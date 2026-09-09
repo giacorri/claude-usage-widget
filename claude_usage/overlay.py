@@ -179,6 +179,35 @@ def _burn_badge_text(alert) -> str:
     return ""
 
 
+def draw_claude_mark(p: QPainter, cx: float, cy: float, size: float) -> None:
+    """Draw Claude's starburst at (cx, cy), *size* across.
+
+    Rays are tapered wedges rather than strokes: at 10 pt a round-capped
+    line collapses into a blob, while a wedge keeps the star readable.
+    """
+    import math
+
+    rays = 10
+    outer = size / 2
+    inner = outer * 0.10
+    half_w = math.radians(13.5)
+    p.save()
+    p.setPen(Qt.NoPen)
+    p.setBrush(_hex_to_qcolor(CLAUDE_MARK_COLOR))
+    for i in range(rays):
+        a = (2 * math.pi / rays) * i - math.pi / 2
+        # Alternating length is what makes it read as Claude's mark and
+        # not as a generic asterisk.
+        tip = outer if i % 2 == 0 else outer * 0.60
+        poly = QPolygonF([
+            QPointF(cx + math.cos(a) * tip, cy + math.sin(a) * tip),
+            QPointF(cx + math.cos(a - half_w) * inner, cy + math.sin(a - half_w) * inner),
+            QPointF(cx + math.cos(a + half_w) * inner, cy + math.sin(a + half_w) * inner),
+        ])
+        p.drawPolygon(poly)
+    p.restore()
+
+
 def _bar_color(pct: float, theme: dict[str, str]) -> QColor:
     """Return the progress-bar fill colour for *pct* (0.0 -- 1.0)."""
     if pct < 0.6:
@@ -1364,34 +1393,6 @@ class UsageOverlay(QWidget):
                 p.setBrush(ink)
                 p.drawRect(QRectF(cx, y, bw, h))
             cx += bw
-
-    def _draw_claude_mark(self, p: QPainter, cx: float, cy: float, size: float) -> None:
-        """Draw Claude's starburst at (cx, cy), *size* across.
-
-        Rays are tapered wedges rather than strokes: at 10 pt a round-capped
-        line collapses into a blob, while a wedge keeps the star readable.
-        """
-        import math
-
-        rays = 10
-        outer = size / 2
-        inner = outer * 0.10
-        half_w = math.radians(13.5)
-        p.save()
-        p.setPen(Qt.NoPen)
-        p.setBrush(_hex_to_qcolor(CLAUDE_MARK_COLOR))
-        for i in range(rays):
-            a = (2 * math.pi / rays) * i - math.pi / 2
-            # Alternating length is what makes it read as Claude's mark and
-            # not as a generic asterisk.
-            tip = outer if i % 2 == 0 else outer * 0.60
-            poly = QPolygonF([
-                QPointF(cx + math.cos(a) * tip, cy + math.sin(a) * tip),
-                QPointF(cx + math.cos(a - half_w) * inner, cy + math.sin(a - half_w) * inner),
-                QPointF(cx + math.cos(a + half_w) * inner, cy + math.sin(a + half_w) * inner),
-            ])
-            p.drawPolygon(poly)
-        p.restore()
 
     def _draw_bar(
         self,

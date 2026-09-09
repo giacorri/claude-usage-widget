@@ -48,7 +48,12 @@ from PySide6.QtWidgets import (
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
-from claude_usage.overlay import UsageOverlay, _bar_color, _hex_to_qcolor
+from claude_usage.overlay import (
+    UsageOverlay,
+    _bar_color,
+    _hex_to_qcolor,
+    draw_claude_mark,
+)
 from claude_usage.pricing import MODEL_PRICING, calculate_cost, get_pricing
 from claude_usage.themes import ThemeStyle, get_style, get_theme
 
@@ -1813,9 +1818,10 @@ class ClaudeUsageApp(QObject):
         fm = QFontMetricsF(font)
 
         bar_w, bar_h, pad, group_gap = 38.0, 6.0, 6.0, 16.0
+        mark_size, mark_gap = 14.0, 7.0
         labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
         widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
-        width = int(sum(widths) + group_gap) + 2
+        width = int(mark_size + mark_gap + sum(widths) + group_gap) + 2
         height = 20
 
         dpr = 2
@@ -1828,7 +1834,8 @@ class ClaudeUsageApp(QObject):
         baseline = height / 2 + fm.ascent() / 2 - 1.0
         bar_y = (height - bar_h) / 2
 
-        x = 0.0
+        draw_claude_mark(p, mark_size / 2, height / 2, mark_size)
+        x = mark_size + mark_gap
         for (pct, _rst), label in zip(groups, labels):
             p.setPen(Qt.NoPen)
             p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
