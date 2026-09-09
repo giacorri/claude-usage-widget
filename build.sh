@@ -24,9 +24,13 @@ uv run --with pyinstaller --with PySide6-Essentials \
 APP="build/Claude Usage.app"
 # PyInstaller writes its own Info.plist; overwrite the few keys we care about
 # rather than hand it the whole file, so its bootloader keys survive.
+# LSUIElement: this is a menu-bar app. Without it the OSD — a frameless
+# always-on-top panel — drags a Dock icon and a ⌘-Tab entry behind it for a
+# window you never switch to.
 /usr/libexec/PlistBuddy -c "Set :CFBundleName 'Claude Usage'" \
     -c "Set :CFBundleDisplayName 'Claude Usage'" \
     -c "Set :NSHighResolutionCapable true" \
+    -c "Add :LSUIElement bool true" \
     "$APP/Contents/Info.plist" >/dev/null
 
 # Ad-hoc signature: a stable identity, so macOS keeps what it granted the
@@ -41,4 +45,30 @@ if [[ "${1:-}" == "install" ]]; then
     rm -rf "/Applications/Claude Usage.app"
     cp -R "$APP" /Applications/
     echo "installed /Applications/Claude Usage.app"
+
+    # Start at login. A LaunchAgent rather than a Login Item: it needs no
+    # System Events automation prompt, and it is a file this repo can rewrite.
+    AGENT="$HOME/Library/LaunchAgents/com.giacorri.claudeusage.plist"
+    mkdir -p "$(dirname "$AGENT")"
+    cat > "$AGENT" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.giacorri.claudeusage</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Claude Usage.app/Contents/MacOS/Claude Usage</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
+PLIST
+    launchctl bootout "gui/$UID/com.giacorri.claudeusage" 2>/dev/null || true
+    launchctl bootstrap "gui/$UID" "$AGENT"
+    echo "login agent loaded: $AGENT"
 fi
