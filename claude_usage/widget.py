@@ -1818,7 +1818,7 @@ class ClaudeUsageApp(QObject):
         fm = QFontMetricsF(font)
 
         bar_w, bar_h, pad, group_gap = 38.0, 6.0, 6.0, 16.0
-        mark_size, mark_gap = 14.0, 7.0
+        mark_size, mark_gap = 18.0, 6.0
         labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
         widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
         width = int(mark_size + mark_gap + sum(widths) + group_gap) + 2
@@ -1834,7 +1834,9 @@ class ClaudeUsageApp(QObject):
         baseline = height / 2 + fm.ascent() / 2 - 1.0
         bar_y = (height - bar_h) / 2
 
-        draw_claude_mark(p, mark_size / 2, height / 2, mark_size)
+        # Brighter than the OSD's clay: the menu bar sits on whatever the
+        # wallpaper is doing up there, and #d97757 disappeared into it.
+        draw_claude_mark(p, mark_size / 2, height / 2, mark_size, "#ff8f66")
         x = mark_size + mark_gap
         for (pct, _rst), label in zip(groups, labels):
             p.setPen(Qt.NoPen)

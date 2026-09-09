@@ -24,7 +24,6 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
-    QPolygonF,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QApplication, QWidget
@@ -179,32 +178,32 @@ def _burn_badge_text(alert) -> str:
     return ""
 
 
-def draw_claude_mark(p: QPainter, cx: float, cy: float, size: float) -> None:
+def draw_claude_mark(p: QPainter, cx: float, cy: float, size: float,
+                     color: str = CLAUDE_MARK_COLOR) -> None:
     """Draw Claude's starburst at (cx, cy), *size* across.
 
-    Rays are tapered wedges rather than strokes: at 10 pt a round-capped
-    line collapses into a blob, while a wedge keeps the star readable.
+    Round-capped strokes, not tapered wedges: a wedge narrows to a hairline
+    towards the tip, and at the 18 pt the menu bar allows the whole mark went
+    faint. Ray length alternates, which is what keeps it Claude's mark and not
+    a generic asterisk.
     """
     import math
 
-    rays = 10
+    rays = 8
     outer = size / 2
-    inner = outer * 0.10
-    half_w = math.radians(13.5)
     p.save()
-    p.setPen(Qt.NoPen)
-    p.setBrush(_hex_to_qcolor(CLAUDE_MARK_COLOR))
+    p.setBrush(Qt.NoBrush)
+    pen = QPen(_hex_to_qcolor(color))
+    pen.setWidthF(max(1.4, size * 0.11))
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
     for i in range(rays):
         a = (2 * math.pi / rays) * i - math.pi / 2
-        # Alternating length is what makes it read as Claude's mark and
-        # not as a generic asterisk.
-        tip = outer if i % 2 == 0 else outer * 0.60
-        poly = QPolygonF([
+        tip = outer if i % 2 == 0 else outer * 0.58
+        p.drawLine(
+            QPointF(cx + math.cos(a) * outer * 0.06, cy + math.sin(a) * outer * 0.06),
             QPointF(cx + math.cos(a) * tip, cy + math.sin(a) * tip),
-            QPointF(cx + math.cos(a - half_w) * inner, cy + math.sin(a - half_w) * inner),
-            QPointF(cx + math.cos(a + half_w) * inner, cy + math.sin(a + half_w) * inner),
-        ])
-        p.drawPolygon(poly)
+        )
     p.restore()
 
 
@@ -1076,7 +1075,7 @@ class UsageOverlay(QWidget):
         gutter = 24 * s
         row_pad_x = pad_x + gutter
         bar_w = w - row_pad_x - pad_x
-        self._draw_claude_mark(p, pad_x + gutter * 0.40, h / 2, 21 * s)
+        draw_claude_mark(p, pad_x + gutter * 0.40, h / 2, 21 * s)
 
         # --- Session row ---
         y = pad_y + 2 * s
