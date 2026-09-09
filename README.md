@@ -5,9 +5,11 @@ window and of the weekly cap you have burned, and when each one comes back.
 It lives in the menu bar, with an optional always-on-top panel — there is no
 window to manage and nothing to open.
 
-![The menu-bar readout](docs/img/menubar.png)
-
-![The panel](docs/img/panel.png)
+<p align="center">
+  <img src="docs/img/menubar.png" alt="The readout in the macOS menu bar" width="520">
+  <br>
+  <img src="docs/img/panel.png" alt="The always-on-top panel" width="520">
+</p>
 
 > A personal fork of [bozdemir/claude-usage-widget](https://github.com/bozdemir/claude-usage-widget).
 > Everything that reads the numbers is upstream's work; this fork changes what
@@ -48,6 +50,10 @@ into a shape the layout was not built for.
 The menu is grouped: the numbers (details, refresh) · the panel (show/hide,
 minimise, always on top) · what the panel shows (the model-scoped row, the
 cost ticker) · appearance (theme, view, opacity, position).
+
+<p align="center">
+  <img src="docs/img/menu.png" alt="The menu, with both windows spelled out at the top" width="380">
+</p>
 
 ## Install
 
