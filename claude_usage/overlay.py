@@ -43,6 +43,12 @@ from claude_usage.ticker import TickerItem
 
 # Base OSD dimensions (at scale=1.0). Ticker adds ~22px to the bottom of
 # the panel; when it's toggled off we collapse back to the original height.
+# Type size for bars mode, fixed on purpose: the scroll wheel changes the
+# panel's width only, so labels and reset times stay readable at any width
+# and it is the bars that get longer or shorter. Raise it to enlarge the
+# text everywhere in that mode.
+TEXT_SCALE = 1.3
+
 # Claude's own clay orange — the mark is the brand's, so it does not follow
 # the theme palette the way the bars do.
 CLAUDE_MARK_COLOR = "#d97757"
@@ -507,7 +513,12 @@ class UsageOverlay(QWidget):
         return base
 
     def _apply_size(self) -> None:
-        """Resize the window to match ``_scale``, view mode, and chrome state."""
+        """Resize the window to match ``_scale``, view mode, and chrome state.
+
+        setFixedSize, not resize: the panel's proportions are computed here,
+        and a frameless window whose edges can be dragged just gets stretched
+        into a shape nothing is laid out for.
+        """
         if self._skin is not None and not self._minimized:
             # Skins declare their own OSD footprint — honour it instead of
             # squeezing the handoff layout into the default's 260×122 box.
@@ -518,13 +529,14 @@ class UsageOverlay(QWidget):
             height = int(self._skin_base_height() * self._scale)
             if self.isVisible():
                 tr = self.frameGeometry().topRight()
-                self.resize(width, height)
+                self.setFixedSize(width, height)
                 self.move(tr.x() - width, tr.y())
             else:
-                self.resize(width, height)
+                self.setFixedSize(width, height)
             return
 
         width = int(BASE_WIDTH * self._scale)
+        unscaled_height = False
         if self._view_mode == VIEW_MODE_GAUGE:
             base = GAUGE_HEIGHT + (SCOPED_ROW_HEIGHT if self._scoped_label else 0)
             if self._codex_available:
@@ -538,15 +550,22 @@ class UsageOverlay(QWidget):
                 base += SCOPED_ROW_HEIGHT
             if self._codex_available:
                 base += 2 * SCOPED_ROW_HEIGHT  # Codex 5h + 7d rows
-        height = MINIMIZED_HEIGHT if self._minimized else int(base * self._scale)
+            # Bars mode paints at a fixed type size, so its height is fixed too.
+            unscaled_height = True
+        if self._minimized:
+            height = MINIMIZED_HEIGHT
+        elif unscaled_height:
+            height = int(base * TEXT_SCALE)
+        else:
+            height = int(base * self._scale)
         # Preserve the top-right corner when resizing so the overlay doesn't
         # visually drift as the user scrolls to scale.
         if self.isVisible():
             tr = self.frameGeometry().topRight()
-            self.resize(width, height)
+            self.setFixedSize(width, height)
             self.move(tr.x() - width, tr.y())
         else:
-            self.resize(width, height)
+            self.setFixedSize(width, height)
 
     def _move_to_default_position(self) -> None:
         """Anchor the overlay according to the configured ``_position``.
@@ -976,7 +995,11 @@ class UsageOverlay(QWidget):
         p.drawArc(rect, start_angle, span)
 
     def _paint_full(self, p: QPainter, w: int, h: int) -> None:
-        s = self._scale
+        # Type and row heights are deliberately NOT scaled here: the wheel
+        # only widens the panel, so the bars get longer or shorter while the
+        # labels, percentages and reset times stay at a readable size. The
+        # window height in _apply_size is fixed for the same reason.
+        s = TEXT_SCALE
         # Per-theme corner radius; default keeps the historical 12px curve.
         radius = self._style.corner_radius * s
 

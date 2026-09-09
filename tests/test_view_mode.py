@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from claude_usage.overlay import (
     BASE_HEIGHT,
     GAUGE_HEIGHT,
+    TEXT_SCALE,
     TICKER_STRIP_HEIGHT,
     VIEW_MODE_BARS,
     VIEW_MODE_GAUGE,
@@ -53,8 +54,10 @@ class TestViewMode(unittest.TestCase):
     def test_set_view_mode_resizes_widget(self) -> None:
         ov = UsageOverlay({"show_ticker": True})
         bars_h = ov.height()
-        # Bars + ticker height ≈ BASE_HEIGHT + TICKER_STRIP_HEIGHT.
-        self.assertEqual(bars_h, BASE_HEIGHT + TICKER_STRIP_HEIGHT)
+        # Bars mode draws at a fixed type size (TEXT_SCALE) so the scroll
+        # wheel only widens the panel; its height carries the same factor.
+        self.assertEqual(
+            bars_h, int((BASE_HEIGHT + TICKER_STRIP_HEIGHT) * TEXT_SCALE))
         ov.set_view_mode(VIEW_MODE_GAUGE)
         self.assertEqual(ov.height(), GAUGE_HEIGHT)
         ov.set_view_mode(VIEW_MODE_BARS)
