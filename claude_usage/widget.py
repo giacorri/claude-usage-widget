@@ -1825,16 +1825,18 @@ class ClaudeUsageApp(QObject):
         font = QFont()
         font.setStyleHint(QFont.Monospace)
         font.setFamily("monospace")
-        font.setPointSizeF(11.0)
+        font.setPointSizeF(13.0)
         font.setBold(True)
         fm = QFontMetricsF(font)
 
-        bar_w, bar_h, pad, group_gap = 38.0, 6.0, 6.0, 16.0
-        mark_size, mark_gap = 18.0, 11.0
+        bar_w, bar_h, pad, group_gap = 42.0, 7.0, 7.0, 17.0
+        mark_size, mark_gap = 20.0, 11.0
         labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
         widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
         width = int(mark_size + mark_gap + sum(widths) + group_gap) + 2
-        height = 20
+        # The menu bar gives 24pt; 22 is the tallest an NSStatusItem image can
+        # be without the system scaling it back down.
+        height = 22
 
         dpr = 2
         pm = QPixmap(int(width * dpr), height * dpr)
