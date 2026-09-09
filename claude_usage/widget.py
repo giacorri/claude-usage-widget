@@ -1818,7 +1818,7 @@ class ClaudeUsageApp(QObject):
         fm = QFontMetricsF(font)
 
         bar_w, bar_h, pad, group_gap = 38.0, 6.0, 6.0, 16.0
-        mark_size, mark_gap = 18.0, 6.0
+        mark_size, mark_gap = 18.0, 11.0
         labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
         widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
         width = int(mark_size + mark_gap + sum(widths) + group_gap) + 2
