@@ -1254,6 +1254,12 @@ class ClaudeUsageApp(QObject):
         self._act_toggle_osd.triggered.connect(self._toggle_overlay)
         m.addAction(self._act_toggle_osd)
 
+        # The model-scoped weekly row (Fable today) comes and goes with what
+        # the API reports, so it gets its own switch rather than a config edit.
+        self._act_toggle_scoped = QAction("◇  Hide model row", m)
+        self._act_toggle_scoped.triggered.connect(self._toggle_scoped_limit)
+        m.addAction(self._act_toggle_scoped)
+
         self._act_refresh = QAction("↻  Refresh", m)
         self._act_refresh.triggered.connect(self._refresh_async)
         m.addAction(self._act_refresh)
@@ -1595,6 +1601,11 @@ class ClaudeUsageApp(QObject):
 
         self._act_toggle_osd.setText(
             "▣  Hide panel" if self.overlay.isVisible() else "▣  Show panel")
+        if self.config.get("show_scoped_limit", True):
+            scoped_name = getattr(self.stats, "scoped_label", "") or "model"
+            self._act_toggle_scoped.setText(f"◇  Hide {scoped_name} row")
+        else:
+            self._act_toggle_scoped.setText("◇  Show model row")
 
         # Update banner — only visible when the GitHub release check
         # found something newer than __version__.
@@ -1878,6 +1889,21 @@ class ClaudeUsageApp(QObject):
             icon.setIsMask(False)
             self.tray.setIcon(icon)
             self.tray.setToolTip(tip)
+
+    def _toggle_scoped_limit(self) -> None:
+        """Show or hide the model-scoped weekly row (e.g. Fable)."""
+        on = not self.config.get("show_scoped_limit", True)
+        self.config["show_scoped_limit"] = on
+        self._persist_config()
+        if not on:
+            # Don't wait for the next poll to drop a row the user just asked
+            # to be rid of; collect_all keeps it clear from here on.
+            self.stats.scoped_utilization = 0.0
+            self.stats.scoped_reset = 0
+            self.stats.scoped_label = ""
+            self.overlay.update_stats(self.stats)
+        else:
+            self._refresh_async()
 
     def _toggle_overlay(self) -> None:
         """Show or hide the OSD — what a left click on the menu bar does."""
