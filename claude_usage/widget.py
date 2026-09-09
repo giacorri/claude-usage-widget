@@ -27,6 +27,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QColor,
     QFont,
     QFontMetricsF,
@@ -1243,22 +1244,11 @@ class ClaudeUsageApp(QObject):
 
         m.addSeparator()
 
+        # ── The numbers ──────────────────────────────────────
         # ── Primary actions ──────────────────────────────────────────
         act_details = QAction("◉  Details…", m)
         act_details.triggered.connect(self._show_popup)
         m.addAction(act_details)
-
-        # Label flips in _sync_menu_state — the menu bar carries the whole
-        # readout, so the panel is the optional half.
-        self._act_toggle_osd = QAction("▣  Hide panel", m)
-        self._act_toggle_osd.triggered.connect(self._toggle_overlay)
-        m.addAction(self._act_toggle_osd)
-
-        # The model-scoped weekly row (Fable today) comes and goes with what
-        # the API reports, so it gets its own switch rather than a config edit.
-        self._act_toggle_scoped = QAction("◇  Hide model row", m)
-        self._act_toggle_scoped.triggered.connect(self._toggle_scoped_limit)
-        m.addAction(self._act_toggle_scoped)
 
         self._act_refresh = QAction("↻  Refresh", m)
         self._act_refresh.triggered.connect(self._refresh_async)
@@ -1266,10 +1256,71 @@ class ClaudeUsageApp(QObject):
 
         m.addSeparator()
 
-        # ── Display submenus (dynamic titles in _sync_menu_state) ────
-        self._opacity_menu = m.addMenu("◐  OSD Opacity")
+        # ── The panel ────────────────────────────────────────
+        # Label flips in _sync_menu_state — the menu bar carries the whole
+        # readout, so the panel is the optional half.
+        self._act_toggle_osd = QAction("▣  Hide panel", m)
+        self._act_toggle_osd.triggered.connect(self._toggle_overlay)
+        m.addAction(self._act_toggle_osd)
+
+        act_minimize = QAction("▭  Minimize / Restore", m)
+        act_minimize.triggered.connect(self.overlay.toggle_minimized)
+        m.addAction(act_minimize)
+
+        self._act_on_top = QAction("▲  Always on top", m)
+        self._act_on_top.setCheckable(True)
+        self._act_on_top.setChecked(self.overlay.is_always_on_top())
+        self._act_on_top.toggled.connect(self._on_toggle_always_on_top)
+        m.addAction(self._act_on_top)
+
+        m.addSeparator()
+
+        # ── What the panel shows ─────────────────────────────
+        # The model-scoped weekly row (Fable today) comes and goes with what
+        # the API reports, so it gets its own switch rather than a config edit.
+        self._act_toggle_scoped = QAction("◇  Hide model row", m)
+        self._act_toggle_scoped.triggered.connect(self._toggle_scoped_limit)
+        m.addAction(self._act_toggle_scoped)
+
+        self._act_ticker = QAction("✦  Show cost ticker", m)
+        self._act_ticker.setCheckable(True)
+        self._act_ticker.setChecked(self.overlay.is_ticker_enabled())
+        self._act_ticker.toggled.connect(self._on_toggle_ticker)
+        m.addAction(self._act_ticker)
+
+        m.addSeparator()
+
+        # ── Appearance ───────────────────────────────────────
+        # Theme submenu — radio group so only one is ticked at a time. The
+        # selection auto-persists to the user config so a restart keeps it.
+        from claude_usage.themes import THEMES
+        self._theme_menu = m.addMenu("◭  Theme")
+        self._theme_group = QActionGroup(self._theme_menu)
+        self._theme_group.setExclusive(True)
+        self._theme_actions: dict[str, QAction] = {}
+        for name in sorted(THEMES.keys()):
+            a = QAction(name, self._theme_menu)
+            a.setCheckable(True)
+            a.setActionGroup(self._theme_group)
+            a.triggered.connect(lambda _checked=False, n=name: self._on_pick_theme(n))
+            self._theme_menu.addAction(a)
+            self._theme_actions[name] = a
+
+        from claude_usage.overlay import VIEW_MODES
+        self._view_menu = m.addMenu("⚏  Panel view")
+        view_group = QActionGroup(self._view_menu)
+        view_group.setExclusive(True)
+        self._view_actions: dict[str, QAction] = {}
+        for mode in VIEW_MODES:
+            a = QAction(mode.capitalize(), self._view_menu)
+            a.setCheckable(True)
+            a.setActionGroup(view_group)
+            a.triggered.connect(lambda _checked=False, md=mode: self._on_pick_view_mode(md))
+            self._view_menu.addAction(a)
+            self._view_actions[mode] = a
+
+        self._opacity_menu = m.addMenu("◐  Panel opacity")
         self._opacity_actions: dict[int, QAction] = {}
-        from PySide6.QtGui import QActionGroup
         opacity_group = QActionGroup(self._opacity_menu)
         opacity_group.setExclusive(True)
         for pct in (100, 75, 50, 25):
@@ -1283,23 +1334,10 @@ class ClaudeUsageApp(QObject):
             self._opacity_menu.addAction(a)
             self._opacity_actions[pct] = a
 
-        from claude_usage.overlay import VIEW_MODES
-        self._view_menu = m.addMenu("⚏  OSD View")
-        view_group = QActionGroup(self._view_menu)
-        view_group.setExclusive(True)
-        self._view_actions: dict[str, QAction] = {}
-        for mode in VIEW_MODES:
-            a = QAction(mode.capitalize(), self._view_menu)
-            a.setCheckable(True)
-            a.setActionGroup(view_group)
-            a.triggered.connect(lambda _checked=False, md=mode: self._on_pick_view_mode(md))
-            self._view_menu.addAction(a)
-            self._view_actions[mode] = a
-
         # Position submenu — four corner presets plus a read-only "Custom"
         # entry that lights up once the user has dragged the overlay.
         from claude_usage.overlay import OSD_POSITIONS, OSD_POSITION_CUSTOM
-        self._position_menu = m.addMenu("⊞  OSD Position")
+        self._position_menu = m.addMenu("⊞  Panel position")
         position_group = QActionGroup(self._position_menu)
         position_group.setExclusive(True)
         self._position_actions: dict[str, QAction] = {}
@@ -1321,43 +1359,6 @@ class ClaudeUsageApp(QObject):
                 )
             self._position_menu.addAction(a)
             self._position_actions[pos] = a
-
-        # Theme submenu — radio group so only one is ticked at a time. The
-        # selection auto-persists to the user config so a restart keeps it.
-        from claude_usage.themes import THEMES
-        self._theme_menu = m.addMenu("◭  Theme")
-        self._theme_group = QActionGroup(self._theme_menu)
-        self._theme_group.setExclusive(True)
-        self._theme_actions: dict[str, QAction] = {}
-        for name in sorted(THEMES.keys()):
-            a = QAction(name, self._theme_menu)
-            a.setCheckable(True)
-            a.setActionGroup(self._theme_group)
-            a.triggered.connect(lambda _checked=False, n=name: self._on_pick_theme(n))
-            self._theme_menu.addAction(a)
-            self._theme_actions[name] = a
-
-        act_minimize = QAction("▭  Minimize / Restore", m)
-        act_minimize.triggered.connect(self.overlay.toggle_minimized)
-        m.addAction(act_minimize)
-
-        self._act_ticker = QAction("✦  Show cost ticker", m)
-        self._act_ticker.setCheckable(True)
-        self._act_ticker.setChecked(self.overlay.is_ticker_enabled())
-        self._act_ticker.toggled.connect(self._on_toggle_ticker)
-        m.addAction(self._act_ticker)
-
-        self._act_news = QAction("📰  Show news ticker", m)
-        self._act_news.setCheckable(True)
-        self._act_news.setChecked(self.overlay.is_news_enabled())
-        self._act_news.toggled.connect(self._on_toggle_news)
-        m.addAction(self._act_news)
-
-        self._act_on_top = QAction("📌  Always on top", m)
-        self._act_on_top.setCheckable(True)
-        self._act_on_top.setChecked(self.overlay.is_always_on_top())
-        self._act_on_top.toggled.connect(self._on_toggle_always_on_top)
-        m.addAction(self._act_on_top)
 
         m.aboutToShow.connect(self._sync_menu_state)
 
@@ -1386,11 +1387,6 @@ class ClaudeUsageApp(QObject):
     def _on_toggle_ticker(self, checked: bool) -> None:
         self.overlay.set_ticker_enabled(checked)
         self.config["show_ticker"] = bool(checked)
-        self._persist_config()
-
-    def _on_toggle_news(self, checked: bool) -> None:
-        self.overlay.set_news_enabled(checked)
-        self.config["show_news"] = bool(checked)
         self._persist_config()
 
     def _on_toggle_always_on_top(self, checked: bool) -> None:
@@ -1628,15 +1624,14 @@ class ClaudeUsageApp(QObject):
         current_theme = str(self.config.get("theme", "default"))
         self._theme_menu.setTitle(f"◭  Theme · {current_theme}")
         current_view = self.overlay.view_mode()
-        self._view_menu.setTitle(f"⚏  OSD View · {current_view}")
+        self._view_menu.setTitle(f"⚏  Panel view · {current_view}")
         opacity_pct = int(round(float(self.config.get("osd_opacity", 1.0)) * 100))
-        self._opacity_menu.setTitle(f"◐  OSD Opacity · {opacity_pct}%")
+        self._opacity_menu.setTitle(f"◐  Panel opacity · {opacity_pct}%")
         current_pos = self.overlay.position()
-        self._position_menu.setTitle(f"⊞  OSD Position · {current_pos}")
+        self._position_menu.setTitle(f"⊞  Panel position · {current_pos}")
 
         # Tick marks on radio-grouped items.
         self._act_ticker.setChecked(self.overlay.is_ticker_enabled())
-        self._act_news.setChecked(self.overlay.is_news_enabled())
         self._act_on_top.setChecked(self.overlay.is_always_on_top())
         theme_act = self._theme_actions.get(current_theme)
         if theme_act is not None:
