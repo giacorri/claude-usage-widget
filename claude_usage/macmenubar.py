@@ -21,6 +21,10 @@ try:  # pragma: no cover - exercised only on macOS with PyObjC installed
     import objc
     from AppKit import (
         NSApp,
+        NSEventMaskLeftMouseDown,
+        NSEventMaskRightMouseDown,
+        NSEventModifierFlagControl,
+        NSEventTypeRightMouseDown,
         NSColor,
         NSFont,
         NSFontAttributeName,
@@ -82,8 +86,10 @@ def _ns_color(hex_color: str) -> Any:
 class MacMenuBarItem:
     """An NSStatusItem whose click opens *menu* (a QMenu)."""
 
-    def __init__(self, on_click: Callable[[QPoint], None]) -> None:
-        self._on_click = on_click
+    def __init__(self, on_menu: Callable[[QPoint], None],
+                 on_toggle: Callable[[], None]) -> None:
+        self._on_menu = on_menu
+        self._on_toggle = on_toggle
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength)
         self._target = _ClickTarget.alloc().initWithHandler_(self._clicked)
@@ -91,9 +97,21 @@ class MacMenuBarItem:
         button.setTarget_(self._target)
         button.setAction_("statusItemClicked:")
         button.setImagePosition_(2)  # NSImageLeft
+        # Both buttons, or a right-click would never reach us: AppKit sends
+        # only left-mouse-up to a status button by default.
+        button.sendActionOn_(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)
 
     def _clicked(self) -> None:
-        """Pop the Qt menu just under the status item."""
+        """Left click toggles the panel; right (or control) click opens the menu."""
+        event = NSApp.currentEvent()
+        wants_menu = False
+        if event is not None:
+            wants_menu = (event.type() == NSEventTypeRightMouseDown
+                          or bool(event.modifierFlags() & NSEventModifierFlagControl))
+        if not wants_menu:
+            self._on_toggle()
+            return
+
         button = self._item.button()
         window = button.window()
         frame = window.frame()
@@ -102,7 +120,7 @@ class MacMenuBarItem:
         # the screen that carries the menu bar (always screens()[0]).
         screen_height = NSScreen.screens()[0].frame().size.height
         NSApp.activateIgnoringOtherApps_(True)
-        self._on_click(QPoint(int(frame.origin.x), int(screen_height - frame.origin.y)))
+        self._on_menu(QPoint(int(frame.origin.x), int(screen_height - frame.origin.y)))
 
     def set_readout(self, pixmap: QPixmap) -> None:
         """Show *pixmap* as the item's whole content.

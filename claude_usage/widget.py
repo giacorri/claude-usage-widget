@@ -1112,7 +1112,8 @@ class ClaudeUsageApp(QObject):
         from claude_usage import macmenubar
         if macmenubar.AVAILABLE:
             try:
-                self._mac_item = macmenubar.MacMenuBarItem(self._context_menu.popup)
+                self._mac_item = macmenubar.MacMenuBarItem(
+                    self._context_menu.popup, self._toggle_overlay)
             except Exception as exc:  # pragma: no cover - AppKit refusing us
                 print(f"menu bar item unavailable: {exc}", file=sys.stderr)
         if self._mac_item is None:
@@ -1177,13 +1178,10 @@ class ClaudeUsageApp(QObject):
         if config.get("osd_minimized", False):
             self.overlay.toggle_minimized()
         if not config.get("osd_visible", True):
-            # Restore "hidden" as MINIMIZED, not fully hidden: the context
-            # menu is only reachable by right-clicking the overlay, so a
-            # truly hidden restore would leave no UI path back — the user
-            # would have to hand-edit config.json. The 6px strip still takes
-            # right-clicks, so recovery is one click away.
-            if not self.overlay._minimized:
-                self.overlay.toggle_minimized()
+            # A real hide, not the 6 px minimised strip: the menu-bar item
+            # brings the panel back with one click, so there is no longer any
+            # risk of hiding the only way to reach the UI.
+            self.overlay.hide()
         self._refresh_async()
 
         # Periodic refresh timer (runs on the GUI thread). The poll interval
@@ -1872,6 +1870,16 @@ class ClaudeUsageApp(QObject):
             icon.setIsMask(False)
             self.tray.setIcon(icon)
             self.tray.setToolTip(tip)
+
+    def _toggle_overlay(self) -> None:
+        """Show or hide the OSD — what a left click on the menu bar does."""
+        if self.overlay.isVisible():
+            self.overlay.hide()
+        else:
+            self.overlay.show()
+            self.overlay.raise_()
+        self.config["osd_visible"] = bool(self.overlay.isVisible())
+        self._persist_config()
 
     def _show_popup(self) -> None:
         # Pick the popup implementation that matches the active theme:
