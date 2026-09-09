@@ -1112,8 +1112,7 @@ class ClaudeUsageApp(QObject):
         from claude_usage import macmenubar
         if macmenubar.AVAILABLE:
             try:
-                self._mac_item = macmenubar.MacMenuBarItem(
-                    self._context_menu.popup, self._toggle_overlay)
+                self._mac_item = macmenubar.MacMenuBarItem(self._context_menu.popup)
             except Exception as exc:  # pragma: no cover - AppKit refusing us
                 print(f"menu bar item unavailable: {exc}", file=sys.stderr)
         if self._mac_item is None:
@@ -1248,6 +1247,12 @@ class ClaudeUsageApp(QObject):
         act_details = QAction("◉  Details…", m)
         act_details.triggered.connect(self._show_popup)
         m.addAction(act_details)
+
+        # Label flips in _sync_menu_state — the menu bar carries the whole
+        # readout, so the panel is the optional half.
+        self._act_toggle_osd = QAction("▣  Hide panel", m)
+        self._act_toggle_osd.triggered.connect(self._toggle_overlay)
+        m.addAction(self._act_toggle_osd)
 
         self._act_refresh = QAction("↻  Refresh", m)
         self._act_refresh.triggered.connect(self._refresh_async)
@@ -1587,6 +1592,9 @@ class ClaudeUsageApp(QObject):
             self._act_stats_header2.setText(
                 f"Weekly   {w_pct}%" + (f"  ·  {w_reset}" if w_reset else "")
             )
+
+        self._act_toggle_osd.setText(
+            "▣  Hide panel" if self.overlay.isVisible() else "▣  Show panel")
 
         # Update banner — only visible when the GitHub release check
         # found something newer than __version__.

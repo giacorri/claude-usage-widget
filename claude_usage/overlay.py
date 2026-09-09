@@ -53,7 +53,7 @@ TEXT_SCALE = 1.3
 CLAUDE_MARK_COLOR = "#d97757"
 
 BASE_WIDTH = 260
-BASE_HEIGHT = 84
+BASE_HEIGHT = 73
 TICKER_STRIP_HEIGHT = 22
 NEWS_STRIP_HEIGHT = 16  # second ticker row for latest headline
 # Extra height for the optional model-scoped weekly bar (matches one

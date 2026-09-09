@@ -23,8 +23,6 @@ try:  # pragma: no cover - exercised only on macOS with PyObjC installed
         NSApp,
         NSEventMaskLeftMouseDown,
         NSEventMaskRightMouseDown,
-        NSEventModifierFlagControl,
-        NSEventTypeRightMouseDown,
         NSColor,
         NSFont,
         NSFontAttributeName,
@@ -86,10 +84,8 @@ def _ns_color(hex_color: str) -> Any:
 class MacMenuBarItem:
     """An NSStatusItem whose click opens *menu* (a QMenu)."""
 
-    def __init__(self, on_menu: Callable[[QPoint], None],
-                 on_toggle: Callable[[], None]) -> None:
+    def __init__(self, on_menu: Callable[[QPoint], None]) -> None:
         self._on_menu = on_menu
-        self._on_toggle = on_toggle
         self._item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength)
         self._target = _ClickTarget.alloc().initWithHandler_(self._clicked)
@@ -97,21 +93,12 @@ class MacMenuBarItem:
         button.setTarget_(self._target)
         button.setAction_("statusItemClicked:")
         button.setImagePosition_(2)  # NSImageLeft
-        # Both buttons, or a right-click would never reach us: AppKit sends
-        # only left-mouse-up to a status button by default.
+        # Both buttons open the menu; a status button is sent only
+        # left-mouse-up by default, so the right one has to be asked for.
         button.sendActionOn_(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)
 
     def _clicked(self) -> None:
-        """Left click toggles the panel; right (or control) click opens the menu."""
-        event = NSApp.currentEvent()
-        wants_menu = False
-        if event is not None:
-            wants_menu = (event.type() == NSEventTypeRightMouseDown
-                          or bool(event.modifierFlags() & NSEventModifierFlagControl))
-        if not wants_menu:
-            self._on_toggle()
-            return
-
+        """Pop the Qt menu just under the status item — either mouse button."""
         button = self._item.button()
         window = button.window()
         frame = window.frame()
