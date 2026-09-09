@@ -218,6 +218,11 @@ class UsageOverlay(QWidget):
         # scalars set in update_stats.
         self._last_stats: UsageStats | None = None
         self._scale: float = float(cfg.get("osd_scale", 1.0))
+        # Scale the painters use. Bars mode pins it to TEXT_SCALE so the wheel
+        # only widens the panel; every other path tracks the wheel. Row and bar
+        # helpers must read THIS, never _scale, or their internals grow inside
+        # a panel whose height no longer follows.
+        self._paint_scale: float = self._scale
         self._opacity: float = float(cfg.get("osd_opacity", 0.75))
         self._minimized: bool = False
 
@@ -848,6 +853,7 @@ class UsageOverlay(QWidget):
         alarming here as in bars mode.
         """
         s = self._scale
+        self._paint_scale = s
         radius = self._style.corner_radius * s
 
         # Background panel.
@@ -1000,6 +1006,7 @@ class UsageOverlay(QWidget):
         # labels, percentages and reset times stay at a readable size. The
         # window height in _apply_size is fixed for the same reason.
         s = TEXT_SCALE
+        self._paint_scale = s
         # Per-theme corner radius; default keeps the historical 12px curve.
         radius = self._style.corner_radius * s
 
@@ -1268,7 +1275,7 @@ class UsageOverlay(QWidget):
         # uppercase the row label for a datasheet feel.
         p.setFont(_mono_font(int(font_label)))
         p.setPen(_hex_to_qcolor(self._theme["text_primary"]))
-        baseline = y + 10 * self._scale
+        baseline = y + 10 * self._paint_scale
         label_text = label
         if self._style.label_case == "upper":
             label_text = label.upper()
@@ -1288,13 +1295,13 @@ class UsageOverlay(QWidget):
             p.setPen(_hex_to_qcolor(self._theme["text_secondary"]))
             rw = p.fontMetrics().horizontalAdvance(reset_label)
             p.drawText(
-                QPointF(w - right_pad - pct_width - 8 * self._scale - rw, baseline),
+                QPointF(w - right_pad - pct_width - 8 * self._paint_scale - rw, baseline),
                 reset_label,
             )
 
         # Bar — skin-specific style: ASCII block glyphs for terminal, sharp
         # rectangle for brutalist/receipt, classic rounded pill otherwise.
-        bar_y = y + 14 * self._scale
+        bar_y = y + 14 * self._paint_scale
         self._draw_bar(p, pad_x, bar_y, bar_w, bar_h, bar_r, pct)
 
     def _paint_paper_grain(self, p: QPainter, w: int, h: int) -> None:
@@ -1398,7 +1405,7 @@ class UsageOverlay(QWidget):
     ) -> None:
         """Render one usage bar in the style dictated by the current theme."""
         style = self._style.bar_style
-        s = self._scale
+        s = self._paint_scale
         if style == BAR_STYLE_ASCII:
             # Monospace block glyphs — htop / btop vibe. We draw with the
             # mono font so each cell is a fixed cell width; filled vs empty
