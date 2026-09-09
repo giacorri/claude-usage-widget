@@ -1322,4 +1322,10 @@ def collect_all(config: dict[str, Any]) -> UsageStats:
         except Exception:
             stats.codex_available = False
 
+    # Every surface keys the scoped bar off a non-empty label (see UsageStats),
+    # so clearing the triple here is enough to hide it from the OSD, the popup,
+    # --statusline and the API at once.
+    if not config.get("show_scoped_limit", True):
+        stats.scoped_utilization, stats.scoped_reset, stats.scoped_label = 0.0, 0, ""
+
     return stats

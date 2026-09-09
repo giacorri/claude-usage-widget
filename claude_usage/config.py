@@ -92,6 +92,13 @@ DEFAULT_CONFIG: Config = {
     # Whether the OSD paints a scrolling per-turn cost ticker along the
     # bottom edge. Toggle at runtime via the right-click menu.
     "show_ticker": True,
+    # Whether a left-click on the OSD opens the details popup. Off: the panel
+    # is a glanceable readout, and details live in the menu-bar menu.
+    "osd_click_opens_details": False,
+    # Whether the model-scoped weekly cap (e.g. the separate "Fable" weekly
+    # limit) gets its own bar. False drops it at collection time, so it
+    # disappears from the OSD, the popup, --statusline and the API alike.
+    "show_scoped_limit": True,
     # News ticker (opt-in): a second strip with Anthropic/Claude headlines.
     # Off by default because it calls out to a third-party feed.
     "show_news": False,

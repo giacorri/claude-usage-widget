@@ -140,6 +140,25 @@ _DRACULA: Dict[str, str] = {
     "live_indicator": "#50fa7b",  # green
 }
 
+# 3b. Zellij — the palette of the ctx-watch.sh usage line this widget replaces.
+#     Dracula hues, but the bar walks green -> yellow -> red with the budget
+#     rather than staying on one accent, and the empty track is comment grey
+#     so it reads like the `░` cells of the original.
+_ZELLIJ: Dict[str, str] = {
+    "bg":             "#1a1b23",  # ghostty ground, deeper than Dracula's #282a36
+    "bar_blue":       "#50fa7b",  # green — fill below 60%
+    "bar_track":      "#6272a4",  # comment — the unfilled cells
+    "text_primary":   "#f8f8f2",  # foreground
+    "text_secondary": "#bfbfbf",
+    "text_dim":       "#6272a4",  # comment — labels, reset countdowns
+    "text_link":      "#8be9fd",  # cyan
+    "separator":      "#44475a",  # current line
+    "warn":           "#f1fa8c",  # yellow — fill from 60%
+    "crit":           "#ff5555",  # red — fill from 80%
+    "error":          "#ff79c6",  # pink
+    "live_indicator": "#ffb86c",  # orange — the leading marker of the old line
+}
+
 # 4. Nord — https://www.nordtheme.com/docs/colors-and-palettes
 #    nord0/nord8/nord1/nord6/nord4/nord3/nord9/nord2/nord13/nord11/nord12
 _NORD: Dict[str, str] = {
@@ -202,6 +221,7 @@ THEMES: Dict[str, Dict[str, str]] = {
     "default":          _DEFAULT,
     "catppuccin-mocha": _CATPPUCCIN_MOCHA,
     "dracula":          _DRACULA,
+    "zellij":           _ZELLIJ,
     "nord":             _NORD,
     "gruvbox-dark":     _GRUVBOX_DARK,
     **_load_skin_themes(),

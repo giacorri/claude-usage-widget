@@ -25,12 +25,22 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPaintEvent
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QIcon,
+    QPainter,
+    QPaintEvent,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMenu,
     QScrollArea,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -38,9 +48,49 @@ from PySide6.QtWidgets import (
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
-from claude_usage.overlay import UsageOverlay, _hex_to_qcolor
+from claude_usage.overlay import UsageOverlay, _bar_color, _hex_to_qcolor
 from claude_usage.pricing import MODEL_PRICING, calculate_cost, get_pricing
 from claude_usage.themes import ThemeStyle, get_style, get_theme
+
+
+def _short_reset_text(ts: int) -> str:
+    """Countdown for the menu bar: "2h10m", "3d3h", "12m". No clock time —
+    up there the space is worth more than the precision, and the exact hour
+    is one click away in the menu."""
+    if not ts:
+        return ""
+    delta = int(ts - datetime.now().timestamp())
+    if delta <= 0:
+        return "now"
+    days, rem = divmod(delta, 86400)
+    hours, minutes = divmod(rem // 60, 60)
+    if days:
+        return f"{days}d{hours}h"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
+def _menu_reset_text(ts: int) -> str:
+    """"resets 13:07 (2h 11m)" — the clock time first, because that is what
+    you plan around; the countdown is the sanity check next to it."""
+    if not ts:
+        return ""
+    now = datetime.now()
+    delta = int(ts - now.timestamp())
+    if delta <= 0:
+        return "resets now"
+    when = datetime.fromtimestamp(ts)
+    days, rem = divmod(delta, 86400)
+    hours, minutes = divmod(rem // 60, 60)
+    if days:
+        rel = f"{days}d {hours}h"
+    elif hours:
+        rel = f"{hours}h {minutes:02d}m"
+    else:
+        rel = f"{minutes}m"
+    clock = when.strftime("%H:%M") if when.date() == now.date() else when.strftime("%a %H:%M")
+    return f"resets {clock} ({rel})"
 
 
 # ---------------------------------------------------------------------------
@@ -1043,9 +1093,29 @@ class ClaudeUsageApp(QObject):
         self.popup = UsagePopup(config)
         self.skin_popup = SkinPopupWidget(config)
 
-        # Context menu shown on right-click of the OSD.
+        # Context menu shown on right-click of the OSD — and, unchanged, as
+        # the menu-bar item's own menu, so the two surfaces can never drift.
         self._context_menu = QMenu()
         self._build_context_menu()
+
+        # Menu-bar item: the readout that survives closing the OSD, which is
+        # the whole point on a single screen. Native NSStatusItem where PyObjC
+        # is there (it is the only way to get readable text up there), Qt's
+        # tray icon everywhere else.
+        self._mac_item = None
+        self.tray: QSystemTrayIcon | None = None
+        from claude_usage import macmenubar
+        if macmenubar.AVAILABLE:
+            try:
+                self._mac_item = macmenubar.MacMenuBarItem(self._context_menu.popup)
+            except Exception as exc:  # pragma: no cover - AppKit refusing us
+                print(f"menu bar item unavailable: {exc}", file=sys.stderr)
+        if self._mac_item is None:
+            self.tray = QSystemTrayIcon(self)
+            self.tray.setContextMenu(self._context_menu)
+            self.tray.setToolTip("Claude Usage")
+            self.tray.show()
+        self._update_tray()
 
         # Webhook dispatcher + notifier
         from claude_usage.webhooks import WebhookDispatcher
@@ -1155,6 +1225,12 @@ class ClaudeUsageApp(QObject):
         self._act_stats_header = QAction("Loading…", m)
         self._act_stats_header.setEnabled(False)
         m.addAction(self._act_stats_header)
+
+        # Second line: the weekly window. Two lines rather than one long
+        # one because each carries a percentage AND a reset time.
+        self._act_stats_header2 = QAction("", m)
+        self._act_stats_header2.setEnabled(False)
+        m.addAction(self._act_stats_header2)
 
         # Update banner — hidden until the GitHub release check finds a
         # newer tag. Clickable: copies the upgrade hint to clipboard.
@@ -1498,9 +1574,15 @@ class ClaudeUsageApp(QObject):
             live_txt = f"  ·  ● {tpm / 1000:.1f}k t/m"
         if self._last_refresh_ts <= 0:
             self._act_stats_header.setText("Loading…")
+            self._act_stats_header2.setText("")
         else:
+            s_reset = _menu_reset_text(int(getattr(self.stats, "session_reset", 0) or 0))
+            w_reset = _menu_reset_text(int(getattr(self.stats, "weekly_reset", 0) or 0))
             self._act_stats_header.setText(
-                f"Session {s_pct}%  ·  Weekly {w_pct}%{live_txt}"
+                f"Session  {s_pct}%" + (f"  ·  {s_reset}" if s_reset else "") + live_txt
+            )
+            self._act_stats_header2.setText(
+                f"Weekly   {w_pct}%" + (f"  ·  {w_reset}" if w_reset else "")
             )
 
         # Update banner — only visible when the GitHub release check
@@ -1606,6 +1688,7 @@ class ClaudeUsageApp(QObject):
         self.stats = stats
         import time as _t
         self._last_refresh_ts = _t.time()
+        self._update_tray()
 
         # Adaptive poll interval: a clean refresh snaps straight back to the
         # base cadence; an errored/rate-limited one doubles the interval (up to
@@ -1699,10 +1782,87 @@ class ClaudeUsageApp(QObject):
     # -------------------------------------------------------------- slots
 
     def _on_overlay_click(self) -> None:
-        self._show_popup()
+        # Off by default: the OSD is something you drag and glance at, and a
+        # click that throws a 520 px panel over your work is a trap. Details
+        # live in the menu-bar menu instead.
+        if self.config.get("osd_click_opens_details", False):
+            self._show_popup()
 
     def _on_overlay_right_click(self, global_pos: QPoint) -> None:
         self._context_menu.popup(global_pos)
+
+    def _tray_readout_pixmap(self, theme: dict) -> QPixmap:
+        """The whole menu-bar readout as one image: 5h group, then weekly.
+
+        Everything is painted rather than split between an NSImage and an
+        attributed title, because the two groups interleave bars and text and
+        AppKit has no way to lay that out for us.
+        """
+        s_pct = max(0.0, min(1.0, float(self.stats.session_utilization)))
+        w_pct = max(0.0, min(1.0, float(self.stats.weekly_utilization)))
+        groups = [
+            (s_pct, _short_reset_text(int(getattr(self.stats, "session_reset", 0) or 0))),
+            (w_pct, _short_reset_text(int(getattr(self.stats, "weekly_reset", 0) or 0))),
+        ]
+
+        font = QFont()
+        font.setStyleHint(QFont.Monospace)
+        font.setFamily("monospace")
+        font.setPointSizeF(11.0)
+        font.setBold(True)
+        fm = QFontMetricsF(font)
+
+        bar_w, bar_h, pad, group_gap = 38.0, 6.0, 6.0, 16.0
+        labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
+        widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
+        width = int(sum(widths) + group_gap) + 2
+        height = 20
+
+        dpr = 2
+        pm = QPixmap(int(width * dpr), height * dpr)
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setFont(font)
+        baseline = height / 2 + fm.ascent() / 2 - 1.0
+        bar_y = (height - bar_h) / 2
+
+        x = 0.0
+        for (pct, _rst), label in zip(groups, labels):
+            p.setPen(Qt.NoPen)
+            p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
+            p.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), bar_h / 2, bar_h / 2)
+            p.setBrush(_bar_color(pct, theme))
+            p.drawRoundedRect(
+                QRectF(x, bar_y, max(bar_h, bar_w * pct), bar_h), bar_h / 2, bar_h / 2)
+            x += bar_w + pad
+
+            # Text stays white: the bar already carries the alarm colour, and
+            # tinting the digits too made the whole group read as one warning.
+            p.setPen(_hex_to_qcolor(theme["text_primary"]))
+            p.drawText(QPointF(x, baseline), label)
+            x += fm.horizontalAdvance(label)
+            x += group_gap
+        p.end()
+        return pm
+
+    def _update_tray(self) -> None:
+        """Repaint the menu-bar readout — 5h on the left, weekly on the right."""
+        theme = get_theme(str(self.config.get("theme", "default")))
+        pm = self._tray_readout_pixmap(theme)
+        s_pct = int(max(0.0, min(1.0, float(self.stats.session_utilization))) * 100)
+        w_pct = int(max(0.0, min(1.0, float(self.stats.weekly_utilization))) * 100)
+        tip = f"Session {s_pct}%  ·  Weekly {w_pct}%"
+
+        if self._mac_item is not None:
+            self._mac_item.set_readout(pm)
+            return
+        if self.tray is not None:
+            icon = QIcon(pm)
+            icon.setIsMask(False)
+            self.tray.setIcon(icon)
+            self.tray.setToolTip(tip)
 
     def _show_popup(self) -> None:
         # Pick the popup implementation that matches the active theme:

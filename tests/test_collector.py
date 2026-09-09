@@ -1131,6 +1131,24 @@ class TestScopedWeeklyLimit(unittest.TestCase):
             self.assertEqual(stats.scoped_label, "")
             self.assertEqual(stats.scoped_utilization, 0.0)
 
+    @patch("claude_usage.collector.fetch_rate_limits")
+    def test_scoped_hidden_when_disabled(self, mock_fetch: Any) -> None:
+        """show_scoped_limit=False clears the triple even when history has one."""
+        from claude_usage.history import append_sample
+        mock_fetch.return_value = {"error": "Rate limited", "rate_limited": True}
+        now = datetime.now().timestamp()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sp = os.path.join(tmpdir, "usage-history.jsonl")
+            append_sample(sp, now - 60, 0.1, 0.6,
+                          session_reset=int(now + 3600),
+                          weekly_reset=int(now + 86400),
+                          scoped=0.44, scoped_reset=int(now + 86400),
+                          scoped_label="Fable")
+            stats = collect_all({"claude_dir": tmpdir, "show_scoped_limit": False})
+            self.assertEqual(stats.scoped_label, "")
+            self.assertEqual(stats.scoped_utilization, 0.0)
+            self.assertEqual(stats.scoped_reset, 0)
+
 
 class _CtxResp:
     """Minimal context-manager stand-in for urlopen's response object."""

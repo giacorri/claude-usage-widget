@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
+    QPolygonF,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QApplication, QWidget
@@ -42,8 +43,12 @@ from claude_usage.ticker import TickerItem
 
 # Base OSD dimensions (at scale=1.0). Ticker adds ~22px to the bottom of
 # the panel; when it's toggled off we collapse back to the original height.
+# Claude's own clay orange — the mark is the brand's, so it does not follow
+# the theme palette the way the bars do.
+CLAUDE_MARK_COLOR = "#d97757"
+
 BASE_WIDTH = 260
-BASE_HEIGHT = 100
+BASE_HEIGHT = 84
 TICKER_STRIP_HEIGHT = 22
 NEWS_STRIP_HEIGHT = 16  # second ticker row for latest headline
 # Extra height for the optional model-scoped weekly bar (matches one
@@ -172,7 +177,7 @@ def _bar_color(pct: float, theme: dict[str, str]) -> QColor:
     """Return the progress-bar fill colour for *pct* (0.0 -- 1.0)."""
     if pct < 0.6:
         return _hex_to_qcolor(theme["bar_blue"])
-    if pct < 0.85:
+    if pct < 0.8:
         return _hex_to_qcolor(theme["warn"])
     return _hex_to_qcolor(theme["crit"])
 
@@ -1006,82 +1011,43 @@ class UsageOverlay(QWidget):
         font_small = max(7, 7.5 * s)
         font_title = max(7, 8 * s)
 
-        # Title — optional skin-specific ASCII prefix (e.g. "┌─ " for
-        # terminal). The prefix is drawn inline so the rozet/LIVE badge
-        # positioning still works off the full string width.
-        title_font = _mono_font(int(font_title))
-        p.setFont(title_font)
-        p.setPen(_hex_to_qcolor(self._theme["text_dim"]))
-        title_y = pad_y + 7 * s
-        title_text = self._style.title_prefix + "CLAUDE"
-        p.drawText(QPointF(pad_x, title_y), title_text)
-
-        # Subagent rozet — only shown when > 0 so single-session users aren't
-        # bothered by a permanent "0 agents" noise. Rendered just right of
-        # CLAUDE in the theme's link colour to signal "active thing".
-        if self._active_subagents > 0:
-            title_w = p.fontMetrics().horizontalAdvance(title_text)
-            rozet = f"⚙ {self._active_subagents}"
-            p.setPen(_hex_to_qcolor(self._theme["text_link"]))
-            p.drawText(QPointF(pad_x + title_w + 6 * s, title_y), rozet)
-
-        # Right-aligned title-row badges: LIVE first (at the right edge), then
-        # the burn/spike badge just to its left. Both use the title font that's
-        # still active, and neither changes the OSD height.
-        badge_right = w - pad_x
-
-        # Live indicator — only drawn when there's recent assistant activity.
-        # Renders as `● LIVE 1.2k tok/min` right-aligned against the title.
-        if self._is_live and self._live_tpm > 0:
-            tpm = self._live_tpm
-            tpm_text = f"{tpm / 1000:.1f}k" if tpm >= 1000 else f"{int(tpm)}"
-            live_text = f"● LIVE {tpm_text} tok/min"
-            live_width = p.fontMetrics().horizontalAdvance(live_text)
-            # Green-ish per-theme accent; fallback covers older themes.
-            p.setPen(_hex_to_qcolor(self._theme.get("live_indicator", "#4ade80")))
-            p.drawText(QPointF(badge_right - live_width, title_y), live_text)
-            badge_right -= live_width + 8 * s
-
-        # Burn / spike / retry-storm badge — bright warn/crit colour, drawn on
-        # the title row just left of LIVE. Signals "the 5h window is burning
-        # fast" or "a turn/retry-loop spiked tokens" at a glance.
-        burn = self._burn_alert
-        if burn is not None and getattr(burn, "active", False):
-            btext = _burn_badge_text(burn)
-            if btext:
-                bwid = p.fontMetrics().horizontalAdvance(btext)
-                color = (self._theme.get("crit") or "#ef4444") \
-                    if getattr(burn, "severity", "") == "crit" \
-                    else (self._theme.get("warn") or "#f59e0b")
-                p.setPen(_hex_to_qcolor(color))
-                p.drawText(QPointF(badge_right - bwid, title_y), btext)
+        # No title band: "CLAUDE" and the LIVE badge cost a whole row to say
+        # what the mark says in a gutter. The mark sits centred against the
+        # rows, which is also what keeps the panel two rows tall.
+        gutter = 24 * s
+        row_pad_x = pad_x + gutter
+        bar_w = w - row_pad_x - pad_x
+        self._draw_claude_mark(p, pad_x + gutter * 0.40, h / 2, 21 * s)
 
         # --- Session row ---
-        y = pad_y + 16 * s
+        y = pad_y + 2 * s
         self._draw_row(
-            p, y, w, pad_x, bar_w, bar_h, bar_r, font_label, font_small,
+            p, y, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
             label="Session",
             pct=self._session_pct,
             reset_label=_format_reset_short(self._session_reset),
+            right_pad=pad_x,
         )
 
         # --- Weekly row ---
         y2 = y + 15 * s + bar_h + 10 * s
         self._draw_row(
-            p, y2, w, pad_x, bar_w, bar_h, bar_r, font_label, font_small,
+            p, y2, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
             label="Weekly",
             pct=self._weekly_pct,
             reset_label=_format_reset_short(self._weekly_reset),
+            right_pad=pad_x,
         )
 
         # --- Scoped weekly row (e.g. "Fable") — only when the API reports it ---
         if self._scoped_label:
             y3 = y2 + 15 * s + bar_h + 10 * s
             self._draw_row(
-                p, y3, w, pad_x, bar_w, bar_h, bar_r, font_label, font_small,
+                p, y3, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
                 label=self._scoped_label,
                 pct=self._scoped_pct,
                 reset_label=_format_reset_short(self._scoped_reset),
+                right_pad=pad_x,
             )
             y2 = y3  # push the footer below the extra row
 
@@ -1093,10 +1059,11 @@ class UsageOverlay(QWidget):
             ):
                 y2 = y2 + 15 * s + bar_h + 10 * s
                 self._draw_row(
-                    p, y2, w, pad_x, bar_w, bar_h, bar_r, font_label, font_small,
+                    p, y2, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
                     label=label,
                     pct=pct,
                     reset_label=_format_reset_short(reset_ts),
+                    right_pad=pad_x,
                 )
 
         # --- Ticker strip / receipt footer (below the weekly row) ---
@@ -1266,8 +1233,14 @@ class UsageOverlay(QWidget):
         label: str,
         pct: float,
         reset_label: str,
+        right_pad: float | None = None,
     ) -> None:
-        """Draw one row: label on the left, reset + percentage on the right, bar below."""
+        """Draw one row: label on the left, reset + percentage on the right, bar below.
+
+        ``right_pad`` defaults to ``pad_x``; pass it when the left margin is
+        widened by a gutter that the right edge should not inherit.
+        """
+        right_pad = pad_x if right_pad is None else right_pad
         # Label + percentage baseline. Some skins (dashboard, brutalist)
         # uppercase the row label for a datasheet feel.
         p.setFont(_mono_font(int(font_label)))
@@ -1282,15 +1255,17 @@ class UsageOverlay(QWidget):
 
         pct_text = f"{int(pct * 100)}%"
         pct_width = p.fontMetrics().horizontalAdvance(pct_text)
-        p.drawText(QPointF(w - pad_x - pct_width, baseline), pct_text)
+        p.drawText(QPointF(w - right_pad - pct_width, baseline), pct_text)
 
-        # Reset-time (between label and percentage, small font)
+        # Reset-time (between label and percentage). It answers "when do I get
+        # my budget back", so it is sized and coloured to be read across a
+        # room-width desk rather than dimmed into the chrome.
         if reset_label:
-            p.setFont(_mono_font(int(font_small)))
-            p.setPen(_hex_to_qcolor(self._theme["text_dim"]))
+            p.setFont(_mono_font(int(max(9, font_label - 1))))
+            p.setPen(_hex_to_qcolor(self._theme["text_secondary"]))
             rw = p.fontMetrics().horizontalAdvance(reset_label)
             p.drawText(
-                QPointF(w - pad_x - pct_width - 8 * self._scale - rw, baseline),
+                QPointF(w - right_pad - pct_width - 8 * self._scale - rw, baseline),
                 reset_label,
             )
 
@@ -1359,6 +1334,34 @@ class UsageOverlay(QWidget):
                 p.setBrush(ink)
                 p.drawRect(QRectF(cx, y, bw, h))
             cx += bw
+
+    def _draw_claude_mark(self, p: QPainter, cx: float, cy: float, size: float) -> None:
+        """Draw Claude's starburst at (cx, cy), *size* across.
+
+        Rays are tapered wedges rather than strokes: at 10 pt a round-capped
+        line collapses into a blob, while a wedge keeps the star readable.
+        """
+        import math
+
+        rays = 10
+        outer = size / 2
+        inner = outer * 0.10
+        half_w = math.radians(13.5)
+        p.save()
+        p.setPen(Qt.NoPen)
+        p.setBrush(_hex_to_qcolor(CLAUDE_MARK_COLOR))
+        for i in range(rays):
+            a = (2 * math.pi / rays) * i - math.pi / 2
+            # Alternating length is what makes it read as Claude's mark and
+            # not as a generic asterisk.
+            tip = outer if i % 2 == 0 else outer * 0.60
+            poly = QPolygonF([
+                QPointF(cx + math.cos(a) * tip, cy + math.sin(a) * tip),
+                QPointF(cx + math.cos(a - half_w) * inner, cy + math.sin(a - half_w) * inner),
+                QPointF(cx + math.cos(a + half_w) * inner, cy + math.sin(a + half_w) * inner),
+            ])
+            p.drawPolygon(poly)
+        p.restore()
 
     def _draw_bar(
         self,
