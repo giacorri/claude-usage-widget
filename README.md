@@ -35,7 +35,9 @@ read rather than something I saw. What I wanted back was narrow and specific:
   bars — plus, if you switch it on, the same two for Codex, because that is
   the other thing I run.
 - **Colour that means something.** Green under 60%, yellow under 80%, red
-  above — on the bar alone, so the numbers stay readable.
+  above — on the bar alone, so the numbers stay readable. The countdown
+  answers a different question — is it going *faster than the clock*? — and
+  can take its own colour (below).
 
 ## What it shows
 
@@ -43,6 +45,18 @@ read rather than something I saw. What I wanted back was narrow and specific:
 and a countdown — 5-hour on the left, weekly on the right. Clicking it opens a
 menu with both windows spelled out, including the clock time each one resets
 at, and everything below.
+
+**Countdowns coloured by pace** (*Colour countdowns by pace* in the menu,
+`pace_colors`). 80% with 45 minutes left is fine; 80% on a Wednesday is not,
+and the bar cannot tell the two apart. The countdown compares what is left
+of the budget with what is left of the window: green while the one covers
+the other at the window's average rate, yellow when it falls a little short,
+red when it will run out well before the reset. The 5-hour
+window counts wall-clock time. The weekly one counts working hours only —
+`pace_work_days` (`0` = Monday, default Mon–Fri) between `pace_work_start_hour`
+and `pace_work_end_hour` (default 9–18, local) — so a week that opens Monday
+noon expects about a tenth gone by Monday evening and nine tenths by Friday,
+and the weekend does not push the expectation up while nothing is used.
 
 **In the panel:** the same two windows as full-width rows. Drag it anywhere;
 the scroll wheel makes it wider or narrower — the type stays the same size and
@@ -111,6 +125,8 @@ no account of ours anywhere.
   icon and bundle identity.
 - **`show_scoped_limit`**: the model-scoped weekly row (Fable, today) is a
   switch in the menu rather than a config-file edit.
+- **`pace_colors`**: the menu-bar countdowns coloured by pace against the
+  clock, with the weekly one paced on working hours.
 - **`osd_click_opens_details`** (default off): a left click on the panel no
   longer throws a 520 px popup over your work.
 - **No news ticker.** It fetched a third-party feed for something this widget

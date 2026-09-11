@@ -102,6 +102,17 @@ DEFAULT_CONFIG: Config = {
     # News ticker (opt-in): a second strip with Anthropic/Claude headlines.
     # Off by default because it calls out to a third-party feed.
     "show_news": False,
+    # Menu-bar countdowns coloured by pace (see pace.py): green while what is
+    # left of the budget covers what is left of the window at its average
+    # rate, yellow when it falls a little short, red when it will run out
+    # well before the reset.
+    # The 5h window paces on wall-clock time; the weekly one only on the
+    # working hours below (datetime.weekday(): 0=Mon .. 6=Sun; hours local,
+    # end exclusive). Empty pace_work_days paces the week on wall-clock too.
+    "pace_colors": True,
+    "pace_work_days": [0, 1, 2, 3, 4],
+    "pace_work_start_hour": 9,
+    "pace_work_end_hour": 18,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

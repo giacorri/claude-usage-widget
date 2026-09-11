@@ -56,6 +56,14 @@ from claude_usage.overlay import (
     draw_claude_mark,
     draw_codex_mark,
 )
+from claude_usage.pace import (
+    LEVEL_CRIT,
+    LEVEL_WARN,
+    SESSION_WINDOW_SECONDS,
+    WEEKLY_WINDOW_SECONDS,
+    expected_fraction,
+    pace_level,
+)
 from claude_usage.pricing import MODEL_PRICING, calculate_cost, get_pricing
 from claude_usage.themes import ThemeStyle, get_style, get_theme
 
@@ -98,6 +106,17 @@ def _menu_reset_text(ts: int) -> str:
         rel = f"{minutes}m"
     clock = when.strftime("%H:%M") if when.date() == now.date() else when.strftime("%a %H:%M")
     return f"resets {clock} ({rel})"
+
+
+def _pace_color(level: str, theme: dict[str, str]) -> QColor:
+    """Countdown colour for a pace level; plain text when there is none."""
+    if level == LEVEL_CRIT:
+        return _hex_to_qcolor(theme["crit"])
+    if level == LEVEL_WARN:
+        return _hex_to_qcolor(theme["warn"])
+    if level:
+        return _hex_to_qcolor(theme["bar_blue"])
+    return _hex_to_qcolor(theme["text_primary"])
 
 
 # ---------------------------------------------------------------------------
@@ -1322,6 +1341,14 @@ class ClaudeUsageApp(QObject):
         self._act_ticker.toggled.connect(self._on_toggle_ticker)
         m.addAction(self._act_ticker)
 
+        # Countdowns in the menu bar coloured by pace — a second signal next
+        # to the bar's, so it has its own switch.
+        self._act_pace = QAction("◔  Colour countdowns by pace", m)
+        self._act_pace.setCheckable(True)
+        self._act_pace.setChecked(bool(self.config.get("pace_colors", False)))
+        self._act_pace.toggled.connect(self._on_toggle_pace)
+        m.addAction(self._act_pace)
+
         m.addSeparator()
 
         # ── Appearance ───────────────────────────────────────
@@ -1422,6 +1449,13 @@ class ClaudeUsageApp(QObject):
         self.overlay.set_ticker_enabled(checked)
         self.config["show_ticker"] = bool(checked)
         self._persist_config()
+
+    def _on_toggle_pace(self, checked: bool) -> None:
+        if checked == bool(self.config.get("pace_colors", False)):
+            return
+        self.config["pace_colors"] = checked
+        self._persist_config()
+        self._update_tray()
 
     def _on_toggle_always_on_top(self, checked: bool) -> None:
         self.overlay.set_always_on_top(checked)
@@ -1680,6 +1714,7 @@ class ClaudeUsageApp(QObject):
         # Tick marks on radio-grouped items.
         self._act_ticker.setChecked(self.overlay.is_ticker_enabled())
         self._act_codex.setChecked(self._codex_enabled())
+        self._act_pace.setChecked(bool(self.config.get("pace_colors", False)))
         self._act_on_top.setChecked(self.overlay.is_always_on_top())
         theme_act = self._theme_actions.get(current_theme)
         if theme_act is not None:
@@ -1864,24 +1899,37 @@ class ClaudeUsageApp(QObject):
         AppKit has no way to lay that out for us.
         """
         st = self.stats
+        config = getattr(self, "config", None) or {}
+        pace_on = bool(config.get("pace_colors", False))
+        now = datetime.now().timestamp()
 
-        def group(pct_attr: str, reset_attr: str) -> tuple[float, str]:
+        def group(pct_attr: str, reset_attr: str, window: int) -> tuple[float, str, str]:
+            """(fraction used, countdown, countdown colour key or "")."""
             pct = max(0.0, min(1.0, float(getattr(st, pct_attr, 0.0) or 0.0)))
-            return pct, _short_reset_text(int(getattr(st, reset_attr, 0) or 0))
+            reset = int(getattr(st, reset_attr, 0) or 0)
+            level = ""
+            if pace_on and reset:
+                expected = expected_fraction(
+                    now, reset, window, config,
+                    working_hours=window == WEEKLY_WINDOW_SECONDS)
+                level = pace_level(pct, expected)
+            return pct, _short_reset_text(reset), level
 
         # One block per provider: its mark, then its 5h and weekly groups.
         # Brighter than the OSD's clay: the menu bar sits on whatever the
         # wallpaper is doing up there, and #d97757 disappeared into it.
-        blocks: list[tuple[Callable[..., None], str, list[tuple[float, str]]]] = [
+        blocks: list[tuple[Callable[..., None], str, list[tuple[float, str, str]]]] = [
             (draw_claude_mark, "#ff8f66", [
-                group("session_utilization", "session_reset"),
-                group("weekly_utilization", "weekly_reset"),
+                group("session_utilization", "session_reset", SESSION_WINDOW_SECONDS),
+                group("weekly_utilization", "weekly_reset", WEEKLY_WINDOW_SECONDS),
             ]),
         ]
         if getattr(st, "codex_available", False):
             blocks.append((draw_codex_mark, "#ececec", [
-                group("codex_session_utilization", "codex_session_reset"),
-                group("codex_weekly_utilization", "codex_weekly_reset"),
+                group("codex_session_utilization", "codex_session_reset",
+                      SESSION_WINDOW_SECONDS),
+                group("codex_weekly_utilization", "codex_weekly_reset",
+                      WEEKLY_WINDOW_SECONDS),
             ]))
 
         font = QFont()
@@ -1893,9 +1941,11 @@ class ClaudeUsageApp(QObject):
 
         bar_w, bar_h, pad, group_gap = 42.0, 7.0, 7.0, 17.0
         mark_size, mark_gap = 20.0, 11.0
-        labels = [[f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
+        # Percentage and countdown as two runs of text: the countdown may take
+        # the pace colour, the percentage never does.
+        labels = [[(f"{int(pct * 100)}%", f" {rst}" if rst else "") for pct, rst, _ in groups]
                   for _, _, groups in blocks]
-        widths = [bar_w + pad + fm.horizontalAdvance(t) for block in labels for t in block]
+        widths = [bar_w + pad + fm.horizontalAdvance(a + b) for block in labels for a, b in block]
         width = int(len(blocks) * (mark_size + mark_gap) + sum(widths)
                     + (len(widths) - 1) * group_gap) + 2
         # The menu bar gives 24pt; 22 is the tallest an NSStatusItem image can
@@ -1916,7 +1966,7 @@ class ClaudeUsageApp(QObject):
         for (draw_mark, mark_color, groups), block_labels in zip(blocks, labels):
             draw_mark(p, x + mark_size / 2, height / 2, mark_size, mark_color)
             x += mark_size + mark_gap
-            for (pct, _rst), label in zip(groups, block_labels):
+            for (pct, _rst, level), (pct_text, rst_text) in zip(groups, block_labels):
                 p.setPen(Qt.NoPen)
                 p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
                 p.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), bar_h / 2, bar_h / 2)
@@ -1925,12 +1975,18 @@ class ClaudeUsageApp(QObject):
                     QRectF(x, bar_y, max(bar_h, bar_w * pct), bar_h), bar_h / 2, bar_h / 2)
                 x += bar_w + pad
 
-                # Text stays white: the bar already carries the alarm colour,
-                # and tinting the digits too made the whole group read as one
-                # warning.
+                # The digits stay white: the bar already carries the alarm
+                # colour, and tinting them too made the whole group read as
+                # one warning. The countdown is the one thing that may take a
+                # colour, and it answers a different question — not "how much
+                # is gone" but "is it going faster than the clock".
                 p.setPen(_hex_to_qcolor(theme["text_primary"]))
-                p.drawText(QPointF(x, baseline), label)
-                x += fm.horizontalAdvance(label)
+                p.drawText(QPointF(x, baseline), pct_text)
+                x += fm.horizontalAdvance(pct_text)
+                if rst_text:
+                    p.setPen(_pace_color(level, theme))
+                    p.drawText(QPointF(x, baseline), rst_text)
+                    x += fm.horizontalAdvance(rst_text)
                 x += group_gap
         p.end()
         return pm

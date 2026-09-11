@@ -48,7 +48,7 @@ def _stats(codex: bool) -> UsageStats:
 
 
 def _readout(codex: bool) -> QPixmap:
-    fake = SimpleNamespace(stats=_stats(codex))
+    fake = SimpleNamespace(stats=_stats(codex), config={"pace_colors": True})
     return ClaudeUsageApp._tray_readout_pixmap(fake, get_theme("zellij"))
 
 
