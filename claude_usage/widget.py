@@ -13,7 +13,7 @@ import sys
 import threading
 import warnings
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import (
     QObject,
@@ -54,6 +54,7 @@ from claude_usage.overlay import (
     _bar_color,
     _hex_to_qcolor,
     draw_claude_mark,
+    draw_codex_mark,
 )
 from claude_usage.pricing import MODEL_PRICING, calculate_cost, get_pricing
 from claude_usage.themes import ThemeStyle, get_style, get_theme
@@ -836,6 +837,21 @@ class UsagePopup(QWidget):
             self._add_calendar_heatmap(yearly, "Last 52 weeks")
         self._add_separator()
 
+        # --- Codex (opt-in second provider) ---
+        if getattr(stats, "codex_available", False):
+            self._add_section_header("Codex")
+            self._add_usage_row(
+                "Current session",
+                _format_reset_duration(stats.codex_session_reset),
+                stats.codex_session_utilization,
+            )
+            self._add_usage_row(
+                "Weekly",
+                _format_reset_day(stats.codex_weekly_reset),
+                stats.codex_weekly_utilization,
+            )
+            self._add_separator()
+
         # --- Anomaly banner ---
         anomaly = getattr(stats, "anomaly", None)
         if anomaly is not None and getattr(anomaly, "is_anomaly", False):
@@ -1235,6 +1251,16 @@ class ClaudeUsageApp(QObject):
         self._act_stats_header2.setEnabled(False)
         m.addAction(self._act_stats_header2)
 
+        # Codex's pair, shown only while the provider is on and answering.
+        self._act_codex_header = QAction("", m)
+        self._act_codex_header.setEnabled(False)
+        self._act_codex_header.setVisible(False)
+        m.addAction(self._act_codex_header)
+        self._act_codex_header2 = QAction("", m)
+        self._act_codex_header2.setEnabled(False)
+        self._act_codex_header2.setVisible(False)
+        m.addAction(self._act_codex_header2)
+
         # Update banner — hidden until the GitHub release check finds a
         # newer tag. Clickable: copies the upgrade hint to clipboard.
         self._act_update_banner = QAction("", m)
@@ -1281,6 +1307,14 @@ class ClaudeUsageApp(QObject):
         self._act_toggle_scoped = QAction("◇  Hide model row", m)
         self._act_toggle_scoped.triggered.connect(self._toggle_scoped_limit)
         m.addAction(self._act_toggle_scoped)
+
+        # Codex is a second provider, not a row: on, it adds its own pair to
+        # both the menu bar and the panel.
+        self._act_codex = QAction("⬡  Show Codex", m)
+        self._act_codex.setCheckable(True)
+        self._act_codex.setChecked(self._codex_enabled())
+        self._act_codex.toggled.connect(self._on_toggle_codex)
+        m.addAction(self._act_codex)
 
         self._act_ticker = QAction("✦  Show cost ticker", m)
         self._act_ticker.setCheckable(True)
@@ -1594,6 +1628,19 @@ class ClaudeUsageApp(QObject):
             self._act_stats_header2.setText(
                 f"Weekly   {w_pct}%" + (f"  ·  {w_reset}" if w_reset else "")
             )
+        codex_on = self._last_refresh_ts > 0 and bool(
+            getattr(self.stats, "codex_available", False))
+        self._act_codex_header.setVisible(codex_on)
+        self._act_codex_header2.setVisible(codex_on)
+        if codex_on:
+            cs_pct = int((getattr(self.stats, "codex_session_utilization", 0.0) or 0.0) * 100)
+            cw_pct = int((getattr(self.stats, "codex_weekly_utilization", 0.0) or 0.0) * 100)
+            cs_reset = _menu_reset_text(int(getattr(self.stats, "codex_session_reset", 0) or 0))
+            cw_reset = _menu_reset_text(int(getattr(self.stats, "codex_weekly_reset", 0) or 0))
+            self._act_codex_header.setText(
+                f"Codex 5h {cs_pct}%" + (f"  ·  {cs_reset}" if cs_reset else ""))
+            self._act_codex_header2.setText(
+                f"Codex 7d {cw_pct}%" + (f"  ·  {cw_reset}" if cw_reset else ""))
 
         self._act_toggle_osd.setText(
             "▣  Hide panel" if self.overlay.isVisible() else "▣  Show panel")
@@ -1632,6 +1679,7 @@ class ClaudeUsageApp(QObject):
 
         # Tick marks on radio-grouped items.
         self._act_ticker.setChecked(self.overlay.is_ticker_enabled())
+        self._act_codex.setChecked(self._codex_enabled())
         self._act_on_top.setChecked(self.overlay.is_always_on_top())
         theme_act = self._theme_actions.get(current_theme)
         if theme_act is not None:
@@ -1815,12 +1863,26 @@ class ClaudeUsageApp(QObject):
         attributed title, because the two groups interleave bars and text and
         AppKit has no way to lay that out for us.
         """
-        s_pct = max(0.0, min(1.0, float(self.stats.session_utilization)))
-        w_pct = max(0.0, min(1.0, float(self.stats.weekly_utilization)))
-        groups = [
-            (s_pct, _short_reset_text(int(getattr(self.stats, "session_reset", 0) or 0))),
-            (w_pct, _short_reset_text(int(getattr(self.stats, "weekly_reset", 0) or 0))),
+        st = self.stats
+
+        def group(pct_attr: str, reset_attr: str) -> tuple[float, str]:
+            pct = max(0.0, min(1.0, float(getattr(st, pct_attr, 0.0) or 0.0)))
+            return pct, _short_reset_text(int(getattr(st, reset_attr, 0) or 0))
+
+        # One block per provider: its mark, then its 5h and weekly groups.
+        # Brighter than the OSD's clay: the menu bar sits on whatever the
+        # wallpaper is doing up there, and #d97757 disappeared into it.
+        blocks: list[tuple[Callable[..., None], str, list[tuple[float, str]]]] = [
+            (draw_claude_mark, "#ff8f66", [
+                group("session_utilization", "session_reset"),
+                group("weekly_utilization", "weekly_reset"),
+            ]),
         ]
+        if getattr(st, "codex_available", False):
+            blocks.append((draw_codex_mark, "#ececec", [
+                group("codex_session_utilization", "codex_session_reset"),
+                group("codex_weekly_utilization", "codex_weekly_reset"),
+            ]))
 
         font = QFont()
         font.setStyleHint(QFont.Monospace)
@@ -1831,9 +1893,11 @@ class ClaudeUsageApp(QObject):
 
         bar_w, bar_h, pad, group_gap = 42.0, 7.0, 7.0, 17.0
         mark_size, mark_gap = 20.0, 11.0
-        labels = [f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
-        widths = [bar_w + pad + fm.horizontalAdvance(t) for t in labels]
-        width = int(mark_size + mark_gap + sum(widths) + group_gap) + 2
+        labels = [[f"{int(pct * 100)}% {rst}".rstrip() for pct, rst in groups]
+                  for _, _, groups in blocks]
+        widths = [bar_w + pad + fm.horizontalAdvance(t) for block in labels for t in block]
+        width = int(len(blocks) * (mark_size + mark_gap) + sum(widths)
+                    + (len(widths) - 1) * group_gap) + 2
         # The menu bar gives 24pt; 22 is the tallest an NSStatusItem image can
         # be without the system scaling it back down.
         height = 22
@@ -1848,25 +1912,26 @@ class ClaudeUsageApp(QObject):
         baseline = height / 2 + fm.ascent() / 2 - 1.0
         bar_y = (height - bar_h) / 2
 
-        # Brighter than the OSD's clay: the menu bar sits on whatever the
-        # wallpaper is doing up there, and #d97757 disappeared into it.
-        draw_claude_mark(p, mark_size / 2, height / 2, mark_size, "#ff8f66")
-        x = mark_size + mark_gap
-        for (pct, _rst), label in zip(groups, labels):
-            p.setPen(Qt.NoPen)
-            p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
-            p.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), bar_h / 2, bar_h / 2)
-            p.setBrush(_bar_color(pct, theme))
-            p.drawRoundedRect(
-                QRectF(x, bar_y, max(bar_h, bar_w * pct), bar_h), bar_h / 2, bar_h / 2)
-            x += bar_w + pad
+        x = 0.0
+        for (draw_mark, mark_color, groups), block_labels in zip(blocks, labels):
+            draw_mark(p, x + mark_size / 2, height / 2, mark_size, mark_color)
+            x += mark_size + mark_gap
+            for (pct, _rst), label in zip(groups, block_labels):
+                p.setPen(Qt.NoPen)
+                p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
+                p.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), bar_h / 2, bar_h / 2)
+                p.setBrush(_bar_color(pct, theme))
+                p.drawRoundedRect(
+                    QRectF(x, bar_y, max(bar_h, bar_w * pct), bar_h), bar_h / 2, bar_h / 2)
+                x += bar_w + pad
 
-            # Text stays white: the bar already carries the alarm colour, and
-            # tinting the digits too made the whole group read as one warning.
-            p.setPen(_hex_to_qcolor(theme["text_primary"]))
-            p.drawText(QPointF(x, baseline), label)
-            x += fm.horizontalAdvance(label)
-            x += group_gap
+                # Text stays white: the bar already carries the alarm colour,
+                # and tinting the digits too made the whole group read as one
+                # warning.
+                p.setPen(_hex_to_qcolor(theme["text_primary"]))
+                p.drawText(QPointF(x, baseline), label)
+                x += fm.horizontalAdvance(label)
+                x += group_gap
         p.end()
         return pm
 
@@ -1877,6 +1942,10 @@ class ClaudeUsageApp(QObject):
         s_pct = int(max(0.0, min(1.0, float(self.stats.session_utilization))) * 100)
         w_pct = int(max(0.0, min(1.0, float(self.stats.weekly_utilization))) * 100)
         tip = f"Session {s_pct}%  ·  Weekly {w_pct}%"
+        if getattr(self.stats, "codex_available", False):
+            cs = int(max(0.0, min(1.0, float(self.stats.codex_session_utilization))) * 100)
+            cw = int(max(0.0, min(1.0, float(self.stats.codex_weekly_utilization))) * 100)
+            tip += f"  ·  Codex {cs}% / {cw}%"
 
         if self._mac_item is not None:
             self._mac_item.set_readout(pm)
@@ -1901,6 +1970,28 @@ class ClaudeUsageApp(QObject):
             self.overlay.update_stats(self.stats)
         else:
             self._refresh_async()
+
+    def _codex_enabled(self) -> bool:
+        return "codex" in (self.config.get("providers") or [])
+
+    def _on_toggle_codex(self, on: bool) -> None:
+        """Switch the Codex provider on or off — its pair in the menu bar,
+        the panel and the menu all follow ``stats.codex_available``."""
+        if on == self._codex_enabled():
+            return
+        providers = [x for x in (self.config.get("providers") or ["claude"]) if x != "codex"]
+        if on:
+            providers.append("codex")
+        self.config["providers"] = providers
+        self._persist_config()
+        if on:
+            # The first poll spawns `codex app-server`, a couple of seconds
+            # the refresh thread absorbs; the pair appears when it answers.
+            self._refresh_async()
+        else:
+            self.stats.codex_available = False
+            self.overlay.update_stats(self.stats)
+            self._update_tray()
 
     def _toggle_overlay(self) -> None:
         """Show or hide the OSD — what a left click on the menu bar does."""

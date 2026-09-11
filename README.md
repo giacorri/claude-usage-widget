@@ -31,7 +31,9 @@ read rather than something I saw. What I wanted back was narrow and specific:
 - **The reset time, not just the percentage.** "62%" tells me nothing on its
   own. "62%, back in 51m" tells me whether to start the big refactor now or
   after lunch.
-- **Claude only.** Not a dashboard for nine providers. Two windows, two bars.
+- **Claude first.** Not a dashboard for nine providers. Two windows, two
+  bars — plus, if you switch it on, the same two for Codex, because that is
+  the other thing I run.
 - **Colour that means something.** Green under 60%, yellow under 80%, red
   above — on the bar alone, so the numbers stay readable.
 
@@ -47,8 +49,12 @@ the scroll wheel makes it wider or narrower — the type stays the same size and
 only the bars stretch, so it stays readable at any width. It cannot be resized
 into a shape the layout was not built for.
 
+**With Codex on** (a menu switch), OpenAI's mark and its own 5-hour and
+weekly pair follow Claude's on both surfaces, read from the local `codex`
+CLI. It is off by default and costs nothing while off.
+
 The menu is grouped: the numbers (details, refresh) · the panel (show/hide,
-minimise, always on top) · what the panel shows (the model-scoped row, the
+minimise, always on top) · what it shows (the model-scoped row, Codex, the
 cost ticker) · appearance (theme, view, opacity, position).
 
 <p align="center">
