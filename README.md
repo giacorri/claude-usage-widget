@@ -74,7 +74,7 @@ minimise, always on top) · what it shows (the model-scoped row, Codex, the
 cost ticker) · appearance (theme, view, opacity, position).
 
 <p align="center">
-  <img src="docs/img/menu.png" alt="The menu, with both windows spelled out at the top" width="380">
+  <img src="docs/img/menu.png" alt="The menu, with each provider's windows spelled out at the top" width="380">
 </p>
 
 ## Install
