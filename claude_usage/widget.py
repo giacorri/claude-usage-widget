@@ -38,18 +38,21 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QLabel,
     QMenu,
     QScrollArea,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
 from claude_usage.overlay import (
+    CLAUDE_MARK_COLOR,
     UsageOverlay,
     _bar_color,
     _hex_to_qcolor,
@@ -106,6 +109,54 @@ def _menu_reset_text(ts: int) -> str:
         rel = f"{minutes}m"
     clock = when.strftime("%H:%M") if when.date() == now.date() else when.strftime("%a %H:%M")
     return f"resets {clock} ({rel})"
+
+
+def _mark_pixmap(draw_mark: Callable[..., None], color: str, size: int) -> QPixmap:
+    """A provider's mark on a transparent square, *size* points across."""
+    dpr = 2
+    pm = QPixmap(size * dpr, size * dpr)
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    draw_mark(p, size / 2, size / 2, size, color)
+    p.end()
+    return pm
+
+
+class _MenuProviderHeader(QWidget):
+    """A provider's row at the top of the menu: its mark and name on the
+    left, whatever live readout it has (Claude's tokens per minute) on the
+    right. A widget rather than a QAction with an icon, because an icon on
+    any item makes Qt reserve an icon column on every item in the menu."""
+
+    MARK_SIZE = 15
+
+    def __init__(self, draw_mark: Callable[..., None], name: str) -> None:
+        super().__init__()
+        self._draw_mark = draw_mark
+        self._mark = QLabel()
+        self._mark.setFixedSize(self.MARK_SIZE, self.MARK_SIZE)
+        self._name = QLabel(name)
+        self._live = QLabel()
+        lay = QHBoxLayout(self)
+        # Left edge lines the mark up with the tick column of the checkable
+        # items below, and the name with their text.
+        lay.setContentsMargins(6, 8, 28, 3)
+        lay.setSpacing(15)
+        lay.addWidget(self._mark)
+        lay.addWidget(self._name)
+        lay.addStretch(1)
+        lay.addWidget(self._live)
+
+    def set_live(self, text: str) -> None:
+        self._live.setText(text)
+
+    def retint(self, palette: dict[str, str], mark_color: str) -> None:
+        self._mark.setPixmap(_mark_pixmap(self._draw_mark, mark_color, self.MARK_SIZE))
+        self._name.setStyleSheet(
+            f"color: {palette['text']}; font-size: 12px; font-weight: 600;")
+        self._live.setStyleSheet(f"color: {palette['dim']}; font-size: 12px;")
 
 
 def _pace_color(level: str, theme: dict[str, str]) -> QColor:
@@ -1257,28 +1308,24 @@ class ClaudeUsageApp(QObject):
     def _build_context_menu(self) -> None:
         m = self._context_menu
 
-        # ── Header (non-interactive, dim) ────────────────────────────
-        # Live-stats summary updated in `_sync_menu_state`. Disabled so
-        # clicks/keyboard nav skip over it.
-        self._act_stats_header = QAction("Loading…", m)
-        self._act_stats_header.setEnabled(False)
-        m.addAction(self._act_stats_header)
+        # ── Header (non-interactive) ─────────────────────────────────
+        # One block per provider: its mark and name, then the session and
+        # weekly windows, one line each because each carries a percentage
+        # AND a reset time. Text filled in by `_sync_menu_state`; the rows
+        # are disabled so clicks and keyboard nav skip over them.
+        self._claude_header = self._add_provider_header(draw_claude_mark, "Claude")
+        self._act_stats_header = self._add_readout_row()
+        self._act_stats_header2 = self._add_readout_row()
 
-        # Second line: the weekly window. Two lines rather than one long
-        # one because each carries a percentage AND a reset time.
-        self._act_stats_header2 = QAction("", m)
-        self._act_stats_header2.setEnabled(False)
-        m.addAction(self._act_stats_header2)
-
-        # Codex's pair, shown only while the provider is on and answering.
-        self._act_codex_header = QAction("", m)
-        self._act_codex_header.setEnabled(False)
+        # Codex's block, shown only while the provider is on and answering.
+        self._act_codex_sep = m.addSeparator()
+        self._act_codex_sep.setVisible(False)
+        self._codex_header = self._add_provider_header(draw_codex_mark, "Codex")
+        self._codex_header_action.setVisible(False)
+        self._act_codex_header = self._add_readout_row()
         self._act_codex_header.setVisible(False)
-        m.addAction(self._act_codex_header)
-        self._act_codex_header2 = QAction("", m)
-        self._act_codex_header2.setEnabled(False)
+        self._act_codex_header2 = self._add_readout_row()
         self._act_codex_header2.setVisible(False)
-        m.addAction(self._act_codex_header2)
 
         # Update banner — hidden until the GitHub release check finds a
         # newer tag. Clickable: copies the upgrade hint to clipboard.
@@ -1568,6 +1615,23 @@ class ClaudeUsageApp(QObject):
             return hex_str
         return f"rgba({r},{g},{b},{alpha:.2f})"
 
+    def _add_provider_header(self, draw_mark: Callable[..., None],
+                             name: str) -> _MenuProviderHeader:
+        header = _MenuProviderHeader(draw_mark, name)
+        act = QWidgetAction(self._context_menu)
+        act.setDefaultWidget(header)
+        self._context_menu.addAction(act)
+        # The action is what shows and hides the row; the widget is what
+        # gets retinted and updated.
+        setattr(self, f"_{name.lower()}_header_action", act)
+        return header
+
+    def _add_readout_row(self) -> QAction:
+        act = QAction("", self._context_menu)
+        act.setEnabled(False)
+        self._context_menu.addAction(act)
+        return act
+
     def _apply_menu_qss(self) -> None:
         """Tint the context menu with the active theme. Without this Qt
         falls back to the system's default grey menu, which clashes with
@@ -1637,19 +1701,26 @@ class ClaudeUsageApp(QObject):
         ):
             if sub is not None:
                 sub.setStyleSheet(qss)
+        # Claude keeps its clay; OpenAI's mark is monochrome, so it takes
+        # whatever the theme uses for text and survives a light skin.
+        self._claude_header.retint(c, CLAUDE_MARK_COLOR)
+        self._codex_header.retint(c, c["text"])
 
     def _sync_menu_state(self) -> None:
         """Refresh dynamic labels and tick marks each time the menu opens —
         live-stats header, submenu titles showing the current selection,
         update banner visibility, and the "Updated Xs ago" footer."""
-        # Stats header — "Session 42% · Weekly 71% · ● 10.5k t/m".
+        # Claude block — "Session 42% · resets …" / "Weekly 71% · resets …",
+        # with the live rate ("● 10.5k t/m") up on the provider's own row,
+        # since it is a fact about Claude, not about either window.
         s_pct = int((getattr(self.stats, "session_utilization", 0.0) or 0.0) * 100)
         w_pct = int((getattr(self.stats, "weekly_utilization", 0.0) or 0.0) * 100)
         live = getattr(self.stats, "live_activity", None)
         live_txt = ""
         if live is not None and getattr(live, "is_live", False):
             tpm = float(getattr(live, "tokens_per_minute", 0.0) or 0.0)
-            live_txt = f"  ·  ● {tpm / 1000:.1f}k t/m"
+            live_txt = f"● {tpm / 1000:.1f}k t/m"
+        self._claude_header.set_live(live_txt)
         if self._last_refresh_ts <= 0:
             self._act_stats_header.setText("Loading…")
             self._act_stats_header2.setText("")
@@ -1657,13 +1728,15 @@ class ClaudeUsageApp(QObject):
             s_reset = _menu_reset_text(int(getattr(self.stats, "session_reset", 0) or 0))
             w_reset = _menu_reset_text(int(getattr(self.stats, "weekly_reset", 0) or 0))
             self._act_stats_header.setText(
-                f"Session  {s_pct}%" + (f"  ·  {s_reset}" if s_reset else "") + live_txt
+                f"Session  {s_pct}%" + (f"  ·  {s_reset}" if s_reset else "")
             )
             self._act_stats_header2.setText(
                 f"Weekly   {w_pct}%" + (f"  ·  {w_reset}" if w_reset else "")
             )
         codex_on = self._last_refresh_ts > 0 and bool(
             getattr(self.stats, "codex_available", False))
+        self._act_codex_sep.setVisible(codex_on)
+        self._codex_header_action.setVisible(codex_on)
         self._act_codex_header.setVisible(codex_on)
         self._act_codex_header2.setVisible(codex_on)
         if codex_on:
@@ -1672,9 +1745,9 @@ class ClaudeUsageApp(QObject):
             cs_reset = _menu_reset_text(int(getattr(self.stats, "codex_session_reset", 0) or 0))
             cw_reset = _menu_reset_text(int(getattr(self.stats, "codex_weekly_reset", 0) or 0))
             self._act_codex_header.setText(
-                f"Codex 5h {cs_pct}%" + (f"  ·  {cs_reset}" if cs_reset else ""))
+                f"Session  {cs_pct}%" + (f"  ·  {cs_reset}" if cs_reset else ""))
             self._act_codex_header2.setText(
-                f"Codex 7d {cw_pct}%" + (f"  ·  {cw_reset}" if cw_reset else ""))
+                f"Weekly   {cw_pct}%" + (f"  ·  {cw_reset}" if cw_reset else ""))
 
         self._act_toggle_osd.setText(
             "▣  Hide panel" if self.overlay.isVisible() else "▣  Show panel")
