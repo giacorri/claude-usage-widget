@@ -6,7 +6,7 @@ It lives in the menu bar, with an optional always-on-top panel — there is no
 window to manage and nothing to open.
 
 <p align="center">
-  <img src="docs/img/menubar.png" alt="The readout in the macOS menu bar" width="520">
+  <img src="docs/img/menubar.png" alt="The readout in the macOS menu bar, with Codex switched on" width="640">
   <br>
   <img src="docs/img/panel.png" alt="The always-on-top panel" width="520">
 </p>
@@ -49,9 +49,11 @@ the scroll wheel makes it wider or narrower — the type stays the same size and
 only the bars stretch, so it stays readable at any width. It cannot be resized
 into a shape the layout was not built for.
 
-**With Codex on** (a menu switch), OpenAI's mark and its own 5-hour and
-weekly pair follow Claude's on both surfaces, read from the local `codex`
-CLI. It is off by default and costs nothing while off.
+**Codex too, behind a toggle.** *Show Codex* in the menu adds OpenAI's mark
+and Codex's own 5-hour and weekly pair after Claude's, on both surfaces —
+that is what the menu-bar picture above shows. The numbers come from the
+local `codex` CLI (`codex app-server`, polled every five minutes). Off by
+default, and nothing runs while it is off.
 
 The menu is grouped: the numbers (details, refresh) · the panel (show/hide,
 minimise, always on top) · what it shows (the model-scoped row, Codex, the
