@@ -39,6 +39,8 @@ dependencies = [
     # macOS only: the menu-bar item is a native NSStatusItem, because Qt's
     # tray icon scales a wide readout down to the menu bar's square.
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    # macOS only: the window list, to size the readout to the menu bar.
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.urls]

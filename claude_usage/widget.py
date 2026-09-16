@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from claude_usage import menubar_space
 from claude_usage.collector import UsageStats, collect_all
 from claude_usage.forecast import format_forecast
 from claude_usage.notifier import UsageNotifier
@@ -173,6 +174,18 @@ def _pace_color(level: str, theme: dict[str, str]) -> QColor:
 # ---------------------------------------------------------------------------
 # Layout constants
 # ---------------------------------------------------------------------------
+# Menu-bar readout geometry, in points: bar, the gap after it, the gap
+# between groups, the provider mark and the gap after it.
+_MB_BAR_W, _MB_BAR_H, _MB_PAD, _MB_GROUP_GAP = 42.0, 7.0, 7.0, 17.0
+_MB_MARK, _MB_MARK_GAP = 20.0, 11.0
+# What the menu bar shows: "auto" fits the room there is, the others force
+# one layout — bars and countdowns, countdowns only, percentages only.
+MENUBAR_LAYOUTS = ("auto", "full", "compact", "numbers")
+_MENUBAR_LABELS = {
+    "auto": "Auto (fit the space)", "full": "Bars and countdowns",
+    "compact": "Countdowns only", "numbers": "Percentages only",
+}
+
 POPUP_WIDTH = 520
 POPUP_PAD = 24
 HEATMAP_HEIGHT = 18
@@ -1207,7 +1220,23 @@ class ClaudeUsageApp(QObject):
             self.tray.setContextMenu(self._context_menu)
             self.tray.setToolTip("Claude Usage")
             self.tray.show()
+        # When the bar has no room for both providers side by side they
+        # take turns; the timer runs only while that is the layout in use.
+        self._alt_index = 0
+        # Width of the image up there now, so the budget does not count the
+        # room the readout itself is taking.
+        self._readout_shown_width: int | None = None
+        self._alt_timer = QTimer(self)
+        self._alt_timer.setInterval(
+            int(float(self.config.get("menubar_alternate_seconds", 4)) * 1000))
+        self._alt_timer.timeout.connect(self._on_alternate_tick)
         self._update_tray()
+        # The room changes with the screen the menu bar is on.
+        app = QApplication.instance()
+        if app is not None:
+            app.screenAdded.connect(lambda _s: self._update_tray())
+            app.screenRemoved.connect(lambda _s: self._update_tray())
+            app.primaryScreenChanged.connect(lambda _s: self._update_tray())
 
         # Webhook dispatcher + notifier
         from claude_usage.webhooks import WebhookDispatcher
@@ -1399,6 +1428,20 @@ class ClaudeUsageApp(QObject):
         m.addSeparator()
 
         # ── Appearance ───────────────────────────────────────
+        # Menu-bar layout — auto fits what room the bar has; the rest pin one.
+        self._menubar_menu = m.addMenu("▤  Menu bar")
+        menubar_group = QActionGroup(self._menubar_menu)
+        menubar_group.setExclusive(True)
+        self._menubar_actions: dict[str, QAction] = {}
+        for layout, label in _MENUBAR_LABELS.items():
+            a = QAction(label, self._menubar_menu)
+            a.setCheckable(True)
+            a.setActionGroup(menubar_group)
+            a.triggered.connect(
+                lambda _checked=False, lo=layout: self._on_pick_menubar_layout(lo))
+            self._menubar_menu.addAction(a)
+            self._menubar_actions[layout] = a
+
         # Theme submenu — radio group so only one is ticked at a time. The
         # selection auto-persists to the user config so a restart keeps it.
         from claude_usage.themes import THEMES
@@ -1775,6 +1818,8 @@ class ClaudeUsageApp(QObject):
 
         # Submenu titles — surface the current selection so the user
         # doesn't have to drill in to know what's active.
+        current_layout = str(self.config.get("menubar_layout", "auto"))
+        self._menubar_menu.setTitle(f"▤  Menu bar · {current_layout}")
         current_theme = str(self.config.get("theme", "default"))
         self._theme_menu.setTitle(f"◭  Theme · {current_theme}")
         current_view = self.overlay.view_mode()
@@ -1789,6 +1834,9 @@ class ClaudeUsageApp(QObject):
         self._act_codex.setChecked(self._codex_enabled())
         self._act_pace.setChecked(bool(self.config.get("pace_colors", False)))
         self._act_on_top.setChecked(self.overlay.is_always_on_top())
+        layout_act = self._menubar_actions.get(current_layout)
+        if layout_act is not None:
+            layout_act.setChecked(True)
         theme_act = self._theme_actions.get(current_theme)
         if theme_act is not None:
             theme_act.setChecked(True)
@@ -1964,20 +2012,15 @@ class ClaudeUsageApp(QObject):
     def _on_overlay_right_click(self, global_pos: QPoint) -> None:
         self._context_menu.popup(global_pos)
 
-    def _tray_readout_pixmap(self, theme: dict) -> QPixmap:
-        """The whole menu-bar readout as one image: 5h group, then weekly.
-
-        Everything is painted rather than split between an NSImage and an
-        attributed title, because the two groups interleave bars and text and
-        AppKit has no way to lay that out for us.
-        """
+    def _readout_blocks(self) -> list[tuple[Callable[..., None], str, list[tuple[float, str, str]]]]:
+        """One block per provider: its mark, its colour, its 5h and weekly
+        groups as (fraction used, countdown, countdown colour key or "")."""
         st = self.stats
         config = getattr(self, "config", None) or {}
         pace_on = bool(config.get("pace_colors", False))
         now = datetime.now().timestamp()
 
         def group(pct_attr: str, reset_attr: str, window: int) -> tuple[float, str, str]:
-            """(fraction used, countdown, countdown colour key or "")."""
             pct = max(0.0, min(1.0, float(getattr(st, pct_attr, 0.0) or 0.0)))
             reset = int(getattr(st, reset_attr, 0) or 0)
             level = ""
@@ -1988,7 +2031,6 @@ class ClaudeUsageApp(QObject):
                 level = pace_level(pct, expected)
             return pct, _short_reset_text(reset), level
 
-        # One block per provider: its mark, then its 5h and weekly groups.
         # Brighter than the OSD's clay: the menu bar sits on whatever the
         # wallpaper is doing up there, and #d97757 disappeared into it.
         blocks: list[tuple[Callable[..., None], str, list[tuple[float, str, str]]]] = [
@@ -2004,23 +2046,56 @@ class ClaudeUsageApp(QObject):
                 group("codex_weekly_utilization", "codex_weekly_reset",
                       WEEKLY_WINDOW_SECONDS),
             ]))
+        return blocks
 
+    @staticmethod
+    def _readout_font() -> QFont:
         font = QFont()
         font.setStyleHint(QFont.Monospace)
         font.setFamily("monospace")
         font.setPointSizeF(13.0)
         font.setBold(True)
-        fm = QFontMetricsF(font)
+        return font
 
-        bar_w, bar_h, pad, group_gap = 42.0, 7.0, 7.0, 17.0
-        mark_size, mark_gap = 20.0, 11.0
-        # Percentage and countdown as two runs of text: the countdown may take
-        # the pace colour, the percentage never does.
-        labels = [[(f"{int(pct * 100)}%", f" {rst}" if rst else "") for pct, rst, _ in groups]
-                  for _, _, groups in blocks]
-        widths = [bar_w + pad + fm.horizontalAdvance(a + b) for block in labels for a, b in block]
-        width = int(len(blocks) * (mark_size + mark_gap) + sum(widths)
-                    + (len(widths) - 1) * group_gap) + 2
+    @staticmethod
+    def _readout_labels(
+        blocks: list, *, countdown: bool,
+    ) -> list[list[tuple[str, str]]]:
+        """Percentage and countdown as two runs of text per group: the
+        countdown may take the pace colour, the percentage never does."""
+        return [[(f"{int(pct * 100)}%", f" {rst}" if countdown and rst else "")
+                 for pct, rst, _ in groups] for _, _, groups in blocks]
+
+    @classmethod
+    def _readout_width(cls, blocks: list, *, bars: bool, countdown: bool) -> int:
+        fm = QFontMetricsF(cls._readout_font())
+        labels = cls._readout_labels(blocks, countdown=countdown)
+        bar_w = _MB_BAR_W + _MB_PAD if bars else 0.0
+        widths = [bar_w + fm.horizontalAdvance(a + b) for block in labels for a, b in block]
+        return int(len(blocks) * (_MB_MARK + _MB_MARK_GAP) + sum(widths)
+                   + (len(widths) - 1) * _MB_GROUP_GAP) + 2
+
+    def _tray_readout_pixmap(
+        self, theme: dict, *, bars: bool = True, countdown: bool = True,
+        blocks: list | None = None, min_width: int = 0,
+    ) -> QPixmap:
+        """The whole menu-bar readout as one image: 5h group, then weekly.
+
+        Everything is painted rather than split between an NSImage and an
+        attributed title, because the two groups interleave bars and text and
+        AppKit has no way to lay that out for us. *bars* and *countdown* are
+        the two things the compact layouts drop; *blocks* narrows it to the
+        providers to show; *min_width* pads it, so alternating providers do
+        not shove the neighbouring items back and forth.
+        """
+        # Called unbound on a stand-in in the tests, hence the class calls.
+        cls = ClaudeUsageApp
+        if blocks is None:
+            blocks = cls._readout_blocks(self)
+        font = cls._readout_font()
+        fm = QFontMetricsF(font)
+        labels = cls._readout_labels(blocks, countdown=countdown)
+        width = max(min_width, cls._readout_width(blocks, bars=bars, countdown=countdown))
         # The menu bar gives 24pt; 22 is the tallest an NSStatusItem image can
         # be without the system scaling it back down.
         height = 22
@@ -2033,20 +2108,23 @@ class ClaudeUsageApp(QObject):
         p.setRenderHint(QPainter.Antialiasing)
         p.setFont(font)
         baseline = height / 2 + fm.ascent() / 2 - 1.0
-        bar_y = (height - bar_h) / 2
+        bar_y = (height - _MB_BAR_H) / 2
 
         x = 0.0
         for (draw_mark, mark_color, groups), block_labels in zip(blocks, labels):
-            draw_mark(p, x + mark_size / 2, height / 2, mark_size, mark_color)
-            x += mark_size + mark_gap
+            draw_mark(p, x + _MB_MARK / 2, height / 2, _MB_MARK, mark_color)
+            x += _MB_MARK + _MB_MARK_GAP
             for (pct, _rst, level), (pct_text, rst_text) in zip(groups, block_labels):
-                p.setPen(Qt.NoPen)
-                p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
-                p.drawRoundedRect(QRectF(x, bar_y, bar_w, bar_h), bar_h / 2, bar_h / 2)
-                p.setBrush(_bar_color(pct, theme))
-                p.drawRoundedRect(
-                    QRectF(x, bar_y, max(bar_h, bar_w * pct), bar_h), bar_h / 2, bar_h / 2)
-                x += bar_w + pad
+                if bars:
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
+                    p.drawRoundedRect(
+                        QRectF(x, bar_y, _MB_BAR_W, _MB_BAR_H), _MB_BAR_H / 2, _MB_BAR_H / 2)
+                    p.setBrush(_bar_color(pct, theme))
+                    p.drawRoundedRect(
+                        QRectF(x, bar_y, max(_MB_BAR_H, _MB_BAR_W * pct), _MB_BAR_H),
+                        _MB_BAR_H / 2, _MB_BAR_H / 2)
+                    x += _MB_BAR_W + _MB_PAD
 
                 # The digits stay white: the bar already carries the alarm
                 # colour, and tinting them too made the whole group read as
@@ -2060,14 +2138,69 @@ class ClaudeUsageApp(QObject):
                     p.setPen(_pace_color(level, theme))
                     p.drawText(QPointF(x, baseline), rst_text)
                     x += fm.horizontalAdvance(rst_text)
-                x += group_gap
+                x += _MB_GROUP_GAP
         p.end()
         return pm
 
+    def _pick_readout_rung(self, blocks: list, budget: float | None) -> tuple[bool, bool, bool]:
+        """(bars, countdown, alternate) for the widest layout that fits.
+
+        Auto walks the rungs widest-first and takes the first one under the
+        budget; the narrowest wins when nothing fits, since a readout that
+        is too wide is not shown at all. The manual layouts skip the walk.
+        """
+        layout = str(self.config.get("menubar_layout", "auto"))
+        if layout == "full":
+            return True, True, False
+        if layout == "compact":
+            return False, True, False
+        if layout == "numbers":
+            return False, False, False
+        rungs: list[tuple[bool, bool, bool]] = [
+            (True, True, False), (False, True, False), (False, False, False)]
+        if len(blocks) > 1:
+            # The providers taking turns: half the groups on screen at a
+            # time. Where these land in the ladder depends on the countdown
+            # text, so the rungs are ordered by measured width, not listed.
+            rungs += [(False, True, True), (False, False, True)]
+        if budget is None:
+            return rungs[0]
+        widths = [ClaudeUsageApp._rung_width(blocks, r) for r in rungs]
+        order = sorted(range(len(rungs)), key=lambda i: -widths[i])
+        for i in order:
+            if widths[i] <= budget:
+                return rungs[i]
+        return rungs[order[-1]]
+
+    @classmethod
+    def _rung_width(cls, blocks: list, rung: tuple[bool, bool, bool]) -> int:
+        bars, countdown, alternate = rung
+        if alternate:
+            return max(cls._readout_width([b], bars=bars, countdown=countdown) for b in blocks)
+        return cls._readout_width(blocks, bars=bars, countdown=countdown)
+
     def _update_tray(self) -> None:
-        """Repaint the menu-bar readout — 5h on the left, weekly on the right."""
+        """Repaint the menu-bar readout — 5h on the left, weekly on the right,
+        in the widest layout the menu bar has room for."""
         theme = get_theme(str(self.config.get("theme", "default")))
-        pm = self._tray_readout_pixmap(theme)
+        blocks = self._readout_blocks()
+        budget = None
+        if self._mac_item is not None:
+            budget = menubar_space.readout_budget(self.config, self._readout_shown_width)
+        bars, countdown, alternate = self._pick_readout_rung(blocks, budget)
+        if alternate:
+            # Padded to the widest provider, so the item keeps one width
+            # while the two take turns; the timer only runs on this rung.
+            shown = [blocks[self._alt_index % len(blocks)]]
+            width = self._rung_width(blocks, (bars, countdown, True))
+            if not self._alt_timer.isActive():
+                self._alt_timer.start()
+        else:
+            shown, width = blocks, 0
+            self._alt_timer.stop()
+        pm = self._tray_readout_pixmap(
+            theme, bars=bars, countdown=countdown, blocks=shown, min_width=width)
+        self._readout_shown_width = int(pm.deviceIndependentSize().width())
         s_pct = int(max(0.0, min(1.0, float(self.stats.session_utilization))) * 100)
         w_pct = int(max(0.0, min(1.0, float(self.stats.weekly_utilization))) * 100)
         tip = f"Session {s_pct}%  ·  Weekly {w_pct}%"
@@ -2084,6 +2217,17 @@ class ClaudeUsageApp(QObject):
             icon.setIsMask(False)
             self.tray.setIcon(icon)
             self.tray.setToolTip(tip)
+
+    def _on_alternate_tick(self) -> None:
+        self._alt_index += 1
+        self._update_tray()
+
+    def _on_pick_menubar_layout(self, layout: str) -> None:
+        if layout == str(self.config.get("menubar_layout", "auto")):
+            return
+        self.config["menubar_layout"] = layout
+        self._persist_config()
+        self._update_tray()
 
     def _toggle_scoped_limit(self) -> None:
         """Show or hide the model-scoped weekly row (e.g. Fable)."""

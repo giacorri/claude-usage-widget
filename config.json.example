@@ -12,5 +12,7 @@
     "theme": "default",
     "show_ticker": true,
     "show_news": false,
-    "osd_view_mode": "bars"
+    "osd_view_mode": "bars",
+    "menubar_layout": "auto",
+    "menubar_reserve": 0
 }

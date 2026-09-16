@@ -113,6 +113,20 @@ DEFAULT_CONFIG: Config = {
     "pace_work_days": [0, 1, 2, 3, 4],
     "pace_work_start_hour": 9,
     "pace_work_end_hour": 18,
+    # The menu-bar readout: "auto" takes the widest layout the bar has room
+    # for (bars and countdowns → countdowns only → percentages only, and with
+    # Codex on, the two providers taking turns); "full", "compact" and
+    # "numbers" pin one of them. See widget.MENUBAR_LAYOUTS.
+    "menubar_layout": "auto",
+    # Points to leave free on top of what the items on screen take (the
+    # window list reports them all on macOS 26). A margin, if the readout
+    # still gets hidden.
+    "menubar_reserve": 0,
+    # Points assumed for the front app's menus on a screen without a notch
+    # (on a notched one the notch fixes where the items may start).
+    "menubar_app_menu_width": 600,
+    # Seconds each provider stays up when the two take turns.
+    "menubar_alternate_seconds": 4,
     # OSD view mode — "bars" (default) or "gauge". See overlay.VIEW_MODES.
     "osd_view_mode": "bars",
     # Where the OSD anchors on screen. One of the four corners, or "custom"

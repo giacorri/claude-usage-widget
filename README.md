@@ -69,9 +69,22 @@ that is what the menu-bar picture above shows. The numbers come from the
 local `codex` CLI (`codex app-server`, polled every five minutes). Off by
 default, and nothing runs while it is off.
 
+**As wide as the bar allows** (*Menu bar* in the menu, `menubar_layout`).
+When the menu bar is full, macOS does not squeeze an item — it hides it, and
+since macOS 26 it does not even tell the app. So the readout sizes itself up
+front: the room right of the notch, minus every other item on screen (the
+window list reports them, the system's and other apps' alike), minus a
+margin (`menubar_reserve`, 0 by default). Into that it fits the widest
+layout it can — bars and countdowns, then countdowns only, then percentages
+only; with Codex on, also the two providers taking turns every few seconds
+(`menubar_alternate_seconds`), at one fixed width so the neighbouring items
+do not shuffle. Still hidden? Raise the margin. The menu can also pin one
+layout instead. On a screen without a notch the left edge is the front
+app's menus, an allowance (`menubar_app_menu_width`).
+
 The menu is grouped: the numbers (details, refresh) · the panel (show/hide,
 minimise, always on top) · what it shows (the model-scoped row, Codex, the
-cost ticker) · appearance (theme, view, opacity, position).
+cost ticker) · appearance (menu bar, theme, view, opacity, position).
 
 <p align="center">
   <img src="docs/img/menu.png" alt="The menu, with each provider's windows spelled out at the top" width="380">
@@ -127,6 +140,8 @@ no account of ours anywhere.
   switch in the menu rather than a config-file edit.
 - **`pace_colors`**: the menu-bar countdowns coloured by pace against the
   clock, with the weekly one paced on working hours.
+- **`menubar_layout`**: the readout fits the room the menu bar has, dropping
+  bars, then countdowns, then alternating providers, instead of vanishing.
 - **`osd_click_opens_details`** (default off): a left click on the panel no
   longer throws a 520 px popup over your work.
 - **No news ticker.** It fetched a third-party feed for something this widget
