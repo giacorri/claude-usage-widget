@@ -14,5 +14,6 @@
     "show_news": false,
     "osd_view_mode": "bars",
     "menubar_layout": "auto",
-    "menubar_reserve": 0
+    "menubar_reserve": 0,
+    "menubar_unobserved_budget": 250
 }
