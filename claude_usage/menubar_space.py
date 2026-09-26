@@ -14,6 +14,11 @@ is computed up front from what *is* observable:
   windows at the status-bar level. Ours is among them and is told apart by
   its width, since the owner is Control Center rather than us.
 
+On macOS 27 status items left the window list altogether — the bar is one
+window of its own — so an empty list means "not observable", not "empty
+bar" (the clock is always there). The budget then falls back to a fixed,
+conservative ``menubar_unobserved_budget``.
+
 Import is guarded like ``macmenubar``: without PyObjC there is no budget and
 the caller keeps the full readout.
 """
@@ -40,36 +45,42 @@ _STATUS_LEVEL = 25
 # A status item's window is its image plus this much, both sides together —
 # measured on macOS 26, not documented.
 ITEM_PADDING = 4.0
+# Budget when the other items cannot be seen: what a 14" bar with the
+# clock and half a dozen icons still leaves free right of the notch.
+UNOBSERVED_BUDGET = 250.0
 
 
 def occupied_width(
     windows: Iterable[dict[str, Any]], *, region_left: float, own_pid: int,
     own_width: float | None, bar_height: float,
-) -> float:
+) -> float | None:
     """Sum of the widths of the status-level windows sitting in the menu bar
-    right of *region_left*, other than our own.
+    right of *region_left*, other than our own — or None when there is none
+    at all, ours included, i.e. the window list does not report them.
 
     Ours is skipped by owner where the item is the app's own window, and
     otherwise by width — the first window as wide as *own_width* — since
     a hosted item's window belongs to the host.
     """
     total = 0.0
+    seen = False
     own_seen = own_width is None
     for w in windows:
         if w.get("kCGWindowLayer") != _STATUS_LEVEL:
             continue
-        if w.get("kCGWindowOwnerPID") == own_pid:
-            continue
         b = w.get("kCGWindowBounds") or {}
         y, h, x = float(b.get("Y", -1)), float(b.get("Height", 0)), float(b.get("X", 0))
         if y != 0 or h > bar_height * 2 or x < region_left:
+            continue
+        seen = True
+        if w.get("kCGWindowOwnerPID") == own_pid:
             continue
         width = float(b.get("Width", 0))
         if not own_seen and abs(width - own_width) <= 1.0:
             own_seen = True
             continue
         total += width
-    return total
+    return total if seen else None
 
 
 def readout_budget(config: dict[str, Any], own_image_width: float | None) -> float | None:
@@ -102,5 +113,7 @@ def readout_budget(config: dict[str, Any], own_image_width: float | None) -> flo
         windows, region_left=region_left, own_pid=os.getpid(),
         own_width=None if own_image_width is None else own_image_width + ITEM_PADDING,
         bar_height=bar_height)
+    if taken is None:
+        return float(config.get("menubar_unobserved_budget", UNOBSERVED_BUDGET))
     reserve = float(config.get("menubar_reserve", 0))
     return region_width - taken - reserve - ITEM_PADDING

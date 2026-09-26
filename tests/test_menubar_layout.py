@@ -159,3 +159,18 @@ class TestOccupiedWidth(unittest.TestCase):
             menubar_space.occupied_width(
                 windows, region_left=850, own_pid=42, own_width=105, bar_height=32),
             47 + 105 + 38)
+
+    def test_no_status_window_at_all_means_unobservable(self) -> None:
+        # macOS 27: the bar is one window below the status level and the
+        # items are not listed, so "nothing taken" would be a lie.
+        windows = [_win(0, 1512, layer=24), _win(1430, 72, y=916, h=56)]
+        self.assertIsNone(
+            menubar_space.occupied_width(
+                windows, region_left=850, own_pid=42, own_width=None, bar_height=32))
+
+    def test_only_our_own_window_is_still_an_observed_bar(self) -> None:
+        self.assertEqual(
+            menubar_space.occupied_width(
+                [_win(1300, 80, pid=42)], region_left=850, own_pid=42,
+                own_width=None, bar_height=32),
+            0.0)

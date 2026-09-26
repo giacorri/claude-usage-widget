@@ -74,11 +74,14 @@ When the menu bar is full, macOS does not squeeze an item — it hides it, and
 since macOS 26 it does not even tell the app. So the readout sizes itself up
 front: the room right of the notch, minus every other item on screen (the
 window list reports them, the system's and other apps' alike), minus a
-margin (`menubar_reserve`, 0 by default). Into that it fits the widest
+margin (`menubar_reserve`, 0 by default). On macOS 27 the window list no
+longer reports status items at all, so there the room is a fixed 250 pt
+(`menubar_unobserved_budget`). Into that it fits the widest
 layout it can — bars and countdowns, then countdowns only, then percentages
 only; with Codex on, also the two providers taking turns every few seconds
 (`menubar_alternate_seconds`), at one fixed width so the neighbouring items
-do not shuffle. Still hidden? Raise the margin. The menu can also pin one
+do not shuffle. Still hidden? Raise the margin, or on macOS 27 lower
+`menubar_unobserved_budget`. The menu can also pin one
 layout instead. On a screen without a notch the left edge is the front
 app's menus, an allowance (`menubar_app_menu_width`).
 
