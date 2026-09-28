@@ -16,8 +16,9 @@ is computed up front from what *is* observable:
 
 On macOS 27 status items left the window list altogether — the bar is one
 window of its own — so an empty list means "not observable", not "empty
-bar" (the clock is always there). The budget then falls back to a fixed,
-conservative ``menubar_unobserved_budget``.
+bar" (the clock is always there). The other items are then assumed to take
+a fixed ``menubar_unobserved_taken``: the room left scales with the screen,
+tight right of a 14" notch, wide on an external display.
 
 Import is guarded like ``macmenubar``: without PyObjC there is no budget and
 the caller keeps the full readout.
@@ -45,9 +46,9 @@ _STATUS_LEVEL = 25
 # A status item's window is its image plus this much, both sides together —
 # measured on macOS 26, not documented.
 ITEM_PADDING = 4.0
-# Budget when the other items cannot be seen: what a 14" bar with the
-# clock and half a dozen icons still leaves free right of the notch.
-UNOBSERVED_BUDGET = 250.0
+# Room assumed taken when the other items cannot be seen: the clock and half
+# a dozen icons, which leaves ~250 pt right of a 14" notch.
+UNOBSERVED_TAKEN = 400.0
 
 
 def occupied_width(
@@ -113,7 +114,13 @@ def readout_budget(config: dict[str, Any], own_image_width: float | None) -> flo
         windows, region_left=region_left, own_pid=os.getpid(),
         own_width=None if own_image_width is None else own_image_width + ITEM_PADDING,
         bar_height=bar_height)
+    return budget_for(region_width, taken, config)
+
+
+def budget_for(region_width: float, taken: float | None, config: dict[str, Any]) -> float:
+    """What is left of *region_width* once the other items and the margin
+    are out; *taken* None means they could not be seen."""
     if taken is None:
-        return float(config.get("menubar_unobserved_budget", UNOBSERVED_BUDGET))
+        taken = float(config.get("menubar_unobserved_taken", UNOBSERVED_TAKEN))
     reserve = float(config.get("menubar_reserve", 0))
     return region_width - taken - reserve - ITEM_PADDING
