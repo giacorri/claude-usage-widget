@@ -174,3 +174,18 @@ class TestOccupiedWidth(unittest.TestCase):
                 [_win(1300, 80, pid=42)], region_left=850, own_pid=42,
                 own_width=None, bar_height=32),
             0.0)
+
+
+class TestBudgetFor(unittest.TestCase):
+    def test_observed_bar_subtracts_items_and_margin(self) -> None:
+        self.assertEqual(
+            menubar_space.budget_for(660, 300, {"menubar_reserve": 20}),
+            660 - 300 - 20 - menubar_space.ITEM_PADDING)
+
+    def test_unobserved_bar_scales_with_the_region(self) -> None:
+        # macOS 27: the same assumption leaves a notched 14" tight and an
+        # external display wide, instead of one fixed width for both.
+        notch = menubar_space.budget_for(660, None, {})
+        external = menubar_space.budget_for(1960, None, {})
+        self.assertLess(notch, 270)
+        self.assertEqual(external - notch, 1300)
