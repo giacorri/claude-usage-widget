@@ -11,7 +11,7 @@ Please **do not** open a public issue for security-sensitive reports
 dispatch, or data redaction).
 
 Instead, use GitHub's private vulnerability reporting: **Security →
-[Report a vulnerability](https://github.com/bozdemir/claude-usage-widget/security/advisories/new)**
+[Report a vulnerability](https://github.com/giacorri/claude-usage-widget/security/advisories/new)**
 on this repository. You'll get a response within a few days.
 
 ## Scope notes
