@@ -22,7 +22,7 @@ guard, scroll-zoom range, and native-Wayland dragging, among others.
 ## Dev setup
 
 ```bash
-git clone https://github.com/bozdemir/claude-usage-widget.git
+git clone https://github.com/giacorri/claude-usage-widget.git
 cd claude-usage-widget
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e . pytest
@@ -44,7 +44,7 @@ fails before the fix.
 
 ## Bug reports
 
-Open an [issue](https://github.com/bozdemir/claude-usage-widget/issues) with:
+Open an [issue](https://github.com/giacorri/claude-usage-widget/issues) with:
 
 - Your **OS** and version
 - **Python version** (`python3 --version`)

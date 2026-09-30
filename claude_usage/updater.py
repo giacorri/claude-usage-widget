@@ -12,7 +12,7 @@ from typing import Tuple
 from urllib.request import Request, urlopen
 
 
-RELEASE_URL = "https://api.github.com/repos/bozdemir/claude-usage-widget/releases/latest"
+RELEASE_URL = "https://api.github.com/repos/giacorri/claude-usage-widget/releases/latest"
 
 
 _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
