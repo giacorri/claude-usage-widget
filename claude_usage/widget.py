@@ -2053,7 +2053,7 @@ class ClaudeUsageApp(QObject):
         font = QFont()
         font.setStyleHint(QFont.Monospace)
         font.setFamily("monospace")
-        font.setPointSizeF(13.0)
+        font.setPointSizeF(16.0)
         font.setBold(True)
         return font
 
