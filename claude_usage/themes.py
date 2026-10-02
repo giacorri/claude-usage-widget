@@ -159,6 +159,16 @@ _ZELLIJ: Dict[str, str] = {
     "live_indicator": "#ffb86c",  # orange — the leading marker of the old line
 }
 
+# 3c. Zellij vivid — the same walk in saturated rather than pastel hues, so
+#     the menu-bar digits still read on a light wallpaper. Saturated, not
+#     darker: a yellow dark enough to stand out turns brown.
+_ZELLIJ_VIVID: Dict[str, str] = {
+    **_ZELLIJ,
+    "bar_blue":       "#0b6e1f",  # forest green
+    "warn":           "#f5e500",  # lemon
+    "crit":           "#c8102e",  # crimson
+}
+
 # 4. Nord — https://www.nordtheme.com/docs/colors-and-palettes
 #    nord0/nord8/nord1/nord6/nord4/nord3/nord9/nord2/nord13/nord11/nord12
 _NORD: Dict[str, str] = {
@@ -222,6 +232,7 @@ THEMES: Dict[str, Dict[str, str]] = {
     "catppuccin-mocha": _CATPPUCCIN_MOCHA,
     "dracula":          _DRACULA,
     "zellij":           _ZELLIJ,
+    "zellij-vivid":     _ZELLIJ_VIVID,
     "nord":             _NORD,
     "gruvbox-dark":     _GRUVBOX_DARK,
     **_load_skin_themes(),

@@ -16,6 +16,7 @@ EXPECTED_THEMES = {
     "catppuccin-mocha",
     "dracula",
     "zellij",
+    "zellij-vivid",
     "nord",
     "gruvbox-dark",
     "terminal",
