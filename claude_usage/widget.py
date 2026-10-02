@@ -2126,12 +2126,14 @@ class ClaudeUsageApp(QObject):
                         _MB_BAR_H / 2, _MB_BAR_H / 2)
                     x += _MB_BAR_W + _MB_PAD
 
-                # The digits stay white: the bar already carries the alarm
-                # colour, and tinting them too made the whole group read as
-                # one warning. The countdown is the one thing that may take a
-                # colour, and it answers a different question — not "how much
-                # is gone" but "is it going faster than the clock".
-                p.setPen(_hex_to_qcolor(theme["text_primary"]))
+                # With a bar the digits stay white: the bar already carries
+                # the alarm colour, and tinting them too made the whole group
+                # read as one warning. Without one they take its colour, or
+                # the compact layouts would lose it altogether. The countdown
+                # answers a different question — not "how much is gone" but
+                # "is it going faster than the clock" — so it keeps its own.
+                p.setPen(_hex_to_qcolor(theme["text_primary"]) if bars
+                         else _bar_color(pct, theme))
                 p.drawText(QPointF(x, baseline), pct_text)
                 x += fm.horizontalAdvance(pct_text)
                 if rst_text:

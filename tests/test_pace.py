@@ -178,6 +178,15 @@ class TestMenuBarCountdownColour(unittest.TestCase):
         pm = _readout(False, 0.80, 45 * 60)
         self.assertFalse(self._has(pm, "bar_blue"))
 
+    def test_without_bars_the_digits_take_the_bar_colour(self) -> None:
+        st = UsageStats()
+        st.session_utilization, st.weekly_utilization = 0.3, 0.9
+        fake = SimpleNamespace(stats=st, config={})
+        pm = ClaudeUsageApp._tray_readout_pixmap(
+            fake, self.theme, bars=False, countdown=False)
+        self.assertTrue(self._has(pm, "bar_blue"))
+        self.assertTrue(self._has(pm, "crit"))
+
 
 if __name__ == "__main__":
     unittest.main()
