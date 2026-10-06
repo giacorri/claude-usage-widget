@@ -13,7 +13,28 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import unittest
 from unittest.mock import patch
 
-from claude_usage.widget import _format_tokens, _prettify_project_name, _short_model_name
+from claude_usage.collector import UsageStats
+from claude_usage.widget import (
+    _format_tokens,
+    _prettify_project_name,
+    _scoped_menu_text,
+    _short_model_name,
+)
+
+
+class TestScopedMenuText(unittest.TestCase):
+    def test_reads_like_the_session_and_weekly_lines(self):
+        stats = UsageStats(scoped_label="Fable", scoped_utilization=0.426, scoped_reset=0)
+        self.assertEqual(_scoped_menu_text("Fable", stats), "Fable    42%")
+
+    def test_carries_the_reset_when_there_is_one(self):
+        stats = UsageStats(
+            scoped_label="Fable", scoped_utilization=0.07, scoped_reset=2_000_000_000)
+        text = _scoped_menu_text("Fable", stats)
+        self.assertTrue(text.startswith("Fable    7%  ·  resets "), text)
+
+    def test_bare_name_when_no_scoped_window_is_reported(self):
+        self.assertEqual(_scoped_menu_text("Fable", UsageStats()), "Fable weekly limit")
 
 
 class TestFormatTokens(unittest.TestCase):

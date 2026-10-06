@@ -112,6 +112,17 @@ def _menu_reset_text(ts: int) -> str:
     return f"resets {clock} ({rel})"
 
 
+def _scoped_menu_text(name: str, stats: UsageStats) -> str:
+    """The model-scoped line of the menu, shaped like Session / Weekly:
+    "Fable    42%  ·  resets Thu 09:00". Just the name while there is no
+    such window to report — the row is switched off, or the API has none."""
+    if not getattr(stats, "scoped_label", ""):
+        return f"{name} weekly limit"
+    pct = int((getattr(stats, "scoped_utilization", 0.0) or 0.0) * 100)
+    reset = _menu_reset_text(int(getattr(stats, "scoped_reset", 0) or 0))
+    return f"{name:<7}  {pct}%" + (f"  ·  {reset}" if reset else "")
+
+
 def _mark_pixmap(draw_mark: Callable[..., None], color: str, size: int) -> QPixmap:
     """A provider's mark on a transparent square, *size* points across."""
     dpr = 2
@@ -1200,6 +1211,7 @@ class ClaudeUsageApp(QObject):
 
         # Context menu shown on right-click of the OSD — and, unchanged, as
         # the menu-bar item's own menu, so the two surfaces can never drift.
+        self._scoped_name = "Fable"
         self._context_menu = QMenu()
         self._build_context_menu()
 
@@ -1345,6 +1357,14 @@ class ClaudeUsageApp(QObject):
         self._claude_header = self._add_provider_header(draw_claude_mark, "Claude")
         self._act_stats_header = self._add_readout_row()
         self._act_stats_header2 = self._add_readout_row()
+        # The model-scoped weekly window (Fable today) is the block's third
+        # line and, unlike the two above, a switch: ticked, the panel and the
+        # details carry the row too; unticked, it is dropped at collection.
+        self._act_scoped = QAction("", m)
+        self._act_scoped.setCheckable(True)
+        self._act_scoped.setChecked(bool(self.config.get("show_scoped_limit", True)))
+        self._act_scoped.toggled.connect(self._on_toggle_scoped)
+        m.addAction(self._act_scoped)
 
         # Codex's block, shown only while the provider is on and answering.
         self._act_codex_sep = m.addSeparator()
@@ -1397,12 +1417,6 @@ class ClaudeUsageApp(QObject):
         m.addSeparator()
 
         # ── What the panel shows ─────────────────────────────
-        # The model-scoped weekly row (Fable today) comes and goes with what
-        # the API reports, so it gets its own switch rather than a config edit.
-        self._act_toggle_scoped = QAction("◇  Hide model row", m)
-        self._act_toggle_scoped.triggered.connect(self._toggle_scoped_limit)
-        m.addAction(self._act_toggle_scoped)
-
         # Codex is a second provider, not a row: on, it adds its own pair to
         # both the menu bar and the panel.
         self._act_codex = QAction("⬡  Show Codex", m)
@@ -1794,11 +1808,11 @@ class ClaudeUsageApp(QObject):
 
         self._act_toggle_osd.setText(
             "▣  Hide panel" if self.overlay.isVisible() else "▣  Show panel")
-        if self.config.get("show_scoped_limit", True):
-            scoped_name = getattr(self.stats, "scoped_label", "") or "model"
-            self._act_toggle_scoped.setText(f"◇  Hide {scoped_name} row")
-        else:
-            self._act_toggle_scoped.setText("◇  Show model row")
+        # Switched off, the stats no longer carry the label: keep the last one
+        # the API gave so the row still names the model it would bring back.
+        self._scoped_name = str(getattr(self.stats, "scoped_label", "") or self._scoped_name)
+        self._act_scoped.setChecked(bool(self.config.get("show_scoped_limit", True)))
+        self._act_scoped.setText(_scoped_menu_text(self._scoped_name, self.stats))
 
         # Update banner — only visible when the GitHub release check
         # found something newer than __version__.
@@ -2231,9 +2245,10 @@ class ClaudeUsageApp(QObject):
         self._persist_config()
         self._update_tray()
 
-    def _toggle_scoped_limit(self) -> None:
+    def _on_toggle_scoped(self, on: bool) -> None:
         """Show or hide the model-scoped weekly row (e.g. Fable)."""
-        on = not self.config.get("show_scoped_limit", True)
+        if on == bool(self.config.get("show_scoped_limit", True)):
+            return
         self.config["show_scoped_limit"] = on
         self._persist_config()
         if not on:

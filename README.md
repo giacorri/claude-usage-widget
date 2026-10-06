@@ -86,9 +86,11 @@ do not shuffle. Still hidden? Raise the margin, or on macOS 27 raise
 layout instead. On a screen without a notch the left edge is the front
 app's menus, an allowance (`menubar_app_menu_width`).
 
-The menu is grouped: the numbers (details, refresh) · the panel (show/hide,
-minimise, always on top) · what it shows (the model-scoped row, Codex, the
-cost ticker) · appearance (menu bar, theme, view, opacity, position).
+The menu is grouped: the numbers (session, weekly and the model-scoped
+window — that last line is also the switch for its row in the panel —
+details, refresh) · the panel (show/hide, minimise, always on top) · what it
+shows (Codex, the cost ticker) · appearance (menu bar, theme, view, opacity,
+position).
 
 <p align="center">
   <img src="docs/img/menu.png" alt="The menu, with each provider's windows spelled out at the top" width="380">
