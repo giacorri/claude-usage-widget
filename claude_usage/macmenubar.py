@@ -75,6 +75,11 @@ def _ns_image(pixmap: QPixmap) -> Any:
     return img
 
 
+# Room around the image inside the item, both sides together; matches
+# menubar_space.ITEM_PADDING.
+_LENGTH_PADDING = 4.0
+
+
 def _ns_color(hex_color: str) -> Any:
     h = hex_color.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
@@ -116,7 +121,12 @@ class MacMenuBarItem:
         NSImage sized explicitly is left at that size, which is what makes a
         wide readout survive up here.
         """
-        self._item.button().setImage_(_ns_image(pixmap))
+        img = _ns_image(pixmap)
+        self._item.button().setImage_(img)
+        # A variable-length item is not always re-measured when its image
+        # grows (seen on macOS 27): the slot keeps the old width and the
+        # readout spills onto the neighbouring item. Claim the width outright.
+        self._item.setLength_(float(img.size().width) + _LENGTH_PADDING)
 
     def dispose(self) -> None:
         NSStatusBar.systemStatusBar().removeStatusItem_(self._item)

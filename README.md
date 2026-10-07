@@ -76,10 +76,11 @@ front: the room right of the notch, minus every other item on screen (the
 window list reports them, the system's and other apps' alike), minus a
 margin (`menubar_reserve`, 0 by default). On macOS 27 the window list no
 longer reports status items at all, so there the other items are assumed
-to take 400 pt (`menubar_unobserved_taken`) — about 250 pt left right of a
+to take 420 pt (`menubar_unobserved_taken`) — about 240 pt left right of a
 14" notch, far more on an external display. Into that it fits the widest
 layout it can — bars and countdowns, then countdowns only, then percentages
-only; with Codex on, also the two providers taking turns every few seconds
+only, each also in a smaller font tried before the next drops something;
+with Codex on, also the two providers taking turns every few seconds
 (`menubar_alternate_seconds`), at one fixed width so the neighbouring items
 do not shuffle. Still hidden? Raise the margin, or on macOS 27 raise
 `menubar_unobserved_taken`. The menu can also pin one

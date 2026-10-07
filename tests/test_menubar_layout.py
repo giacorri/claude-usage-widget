@@ -22,8 +22,13 @@ from claude_usage.widget import ClaudeUsageApp
 
 _app: QApplication | None = None
 
-FULL, COMPACT, NUMBERS = (True, True, False), (False, True, False), (False, False, False)
-COMPACT_ALT, NUMBERS_ALT = (False, True, True), (False, False, True)
+FULL, COMPACT, NUMBERS = (
+    (True, True, False, False), (False, True, False, False), (False, False, False, False))
+COMPACT_ALT, NUMBERS_ALT = (False, True, True, False), (False, False, True, False)
+
+
+def _small(rung: tuple) -> tuple:
+    return (*rung[:3], True)
 
 
 def _get_app() -> QApplication:
@@ -65,6 +70,12 @@ class TestRungWidths(unittest.TestCase):
             self.assertGreater(ClaudeUsageApp._rung_width(blocks, both),
                                ClaudeUsageApp._rung_width(blocks, turns))
 
+    def test_the_smaller_font_narrows_every_shape(self) -> None:
+        blocks = _blocks(codex=True)
+        for rung in (FULL, COMPACT, NUMBERS, COMPACT_ALT, NUMBERS_ALT):
+            self.assertGreater(ClaudeUsageApp._rung_width(blocks, rung),
+                               ClaudeUsageApp._rung_width(blocks, _small(rung)))
+
     def test_alternating_is_as_wide_as_the_wider_provider(self) -> None:
         blocks = _blocks(codex=True)
         singles = [ClaudeUsageApp._readout_width([b], bars=False, countdown=True)
@@ -75,11 +86,13 @@ class TestRungWidths(unittest.TestCase):
         fake = _fake(codex=False)
         theme = get_theme("zellij")
         for bars, countdown in ((True, True), (False, True), (False, False)):
-            pm = ClaudeUsageApp._tray_readout_pixmap(
-                fake, theme, bars=bars, countdown=countdown)
-            self.assertEqual(
-                pm.deviceIndependentSize().width(),
-                ClaudeUsageApp._readout_width(_blocks(False), bars=bars, countdown=countdown))
+            for small in (False, True):
+                pm = ClaudeUsageApp._tray_readout_pixmap(
+                    fake, theme, bars=bars, countdown=countdown, small=small)
+                self.assertEqual(
+                    pm.deviceIndependentSize().width(),
+                    ClaudeUsageApp._readout_width(
+                        _blocks(False), bars=bars, countdown=countdown, small=small))
 
     def test_min_width_pads_so_the_two_turns_share_one_width(self) -> None:
         fake = _fake(codex=True)
@@ -98,7 +111,7 @@ class TestPickingTheRung(unittest.TestCase):
     def setUp(self) -> None:
         _get_app()
 
-    def _pick(self, codex: bool, budget, **config) -> tuple[bool, bool, bool]:
+    def _pick(self, codex: bool, budget, **config) -> tuple[bool, bool, bool, bool]:
         fake = _fake(codex, **config)
         return ClaudeUsageApp._pick_readout_rung(fake, _blocks(codex), budget)
 
@@ -112,19 +125,20 @@ class TestPickingTheRung(unittest.TestCase):
         # Which rung is next narrowest depends on the countdown text, so
         # the ladder is read off the measured widths rather than assumed.
         blocks = _blocks(codex=True)
-        rungs = (FULL, COMPACT, NUMBERS, COMPACT_ALT, NUMBERS_ALT)
+        shapes = (FULL, COMPACT, NUMBERS, COMPACT_ALT, NUMBERS_ALT)
+        rungs = shapes + tuple(_small(r) for r in shapes)
         ladder = sorted(rungs, key=lambda r: -ClaudeUsageApp._rung_width(blocks, r))
         for wider, narrower in pairwise(ladder):
             budget = ClaudeUsageApp._rung_width(blocks, wider) - 1
             self.assertEqual(self._pick(True, budget), narrower)
 
     def test_nothing_fits_takes_the_narrowest(self) -> None:
-        self.assertEqual(self._pick(True, 1), NUMBERS_ALT)
-        self.assertEqual(self._pick(False, 1), NUMBERS)
+        self.assertEqual(self._pick(True, 1), _small(NUMBERS_ALT))
+        self.assertEqual(self._pick(False, 1), _small(NUMBERS))
 
     def test_one_provider_never_alternates(self) -> None:
-        numbers = ClaudeUsageApp._rung_width(_blocks(False), NUMBERS)
-        self.assertEqual(self._pick(False, numbers - 1), NUMBERS)
+        numbers = ClaudeUsageApp._rung_width(_blocks(False), _small(NUMBERS))
+        self.assertEqual(self._pick(False, numbers - 1), _small(NUMBERS))
 
     def test_a_pinned_layout_ignores_the_budget(self) -> None:
         self.assertEqual(self._pick(True, 1, menubar_layout="full"), FULL)

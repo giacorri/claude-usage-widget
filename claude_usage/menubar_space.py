@@ -47,8 +47,8 @@ _STATUS_LEVEL = 25
 # measured on macOS 26, not documented.
 ITEM_PADDING = 4.0
 # Room assumed taken when the other items cannot be seen: the clock and half
-# a dozen icons, which leaves ~250 pt right of a 14" notch.
-UNOBSERVED_TAKEN = 400.0
+# a dozen icons, which leaves ~240 pt right of a 14" notch.
+UNOBSERVED_TAKEN = 420.0
 
 
 def occupied_width(
