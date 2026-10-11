@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -909,6 +910,65 @@ class TestLoadCredentials(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with patch("claude_usage.collector.sys.platform", "linux"):
                 self.assertIsNone(self._load(d))
+
+    # --- expiry-aware source selection -----------------------------------
+    # A stale ~/.claude/.credentials.json (left behind by a one-off
+    # `claude setup-token` / remote session) must not shadow the live
+    # Keychain token: Claude Code refreshes the Keychain, never the file,
+    # so the widget would 401 on every /api/oauth/usage call forever and
+    # the API-only rows (the scoped Fable weekly) would stay blank.
+
+    @staticmethod
+    def _blob(token: str, expires_in_s: float | None) -> str:
+        oauth: dict = {"accessToken": token}
+        if expires_in_s is not None:
+            oauth["expiresAt"] = int((time.time() + expires_in_s) * 1000)
+        return json.dumps({"claudeAiOauth": oauth})
+
+    def _keychain(self, blob: str):
+        import subprocess as _sp
+        return patch("subprocess.run", return_value=_sp.CompletedProcess(
+            args=[], returncode=0, stdout=blob, stderr=""))
+
+    def test_extract_credential_reads_expiry_in_ms(self) -> None:
+        from claude_usage.collector import _extract_credential
+        tok, exp = _extract_credential(self._blob("t", 3600))
+        self.assertEqual(tok, "t")
+        self.assertAlmostEqual(exp, time.time() + 3600, delta=5)
+        self.assertEqual(_extract_credential(self._blob("t", None)), ("t", 0))
+
+    def test_expired_file_token_yields_to_live_keychain(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, ".credentials.json"), "w") as f:
+                f.write(self._blob("file-dead", -3600))
+            with patch("claude_usage.collector.sys.platform", "darwin"), \
+                    self._keychain(self._blob("kc-live", 3600)):
+                self.assertEqual(self._load(d), "kc-live")
+
+    def test_live_file_token_still_wins_over_keychain(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, ".credentials.json"), "w") as f:
+                f.write(self._blob("file-live", 3600))
+            with patch("claude_usage.collector.sys.platform", "darwin"), \
+                    self._keychain(self._blob("kc-live", 7200)):
+                self.assertEqual(self._load(d), "file-live")
+
+    def test_all_expired_returns_freshest(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, ".credentials.json"), "w") as f:
+                f.write(self._blob("file-older", -7200))
+            with patch("claude_usage.collector.sys.platform", "darwin"), \
+                    self._keychain(self._blob("kc-newer", -60)):
+                # Both dead: hand back the freshest so the caller reports
+                # "credentials expired" rather than "no credentials".
+                self.assertEqual(self._load(d), "kc-newer")
+
+    def test_expired_file_token_on_linux_is_still_used(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, ".credentials.json"), "w") as f:
+                f.write(self._blob("file-dead", -3600))
+            with patch("claude_usage.collector.sys.platform", "linux"):
+                self.assertEqual(self._load(d), "file-dead")
 
 
 # ---------------------------------------------------------------------------

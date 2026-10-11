@@ -562,19 +562,38 @@ def _load_subscription_type(claude_dir: str) -> str:
 _MACOS_KEYCHAIN_SERVICES = ("Claude Code-credentials", "Claude Code")
 
 
-def _extract_token(blob: str) -> str | None:
-    """Pull the OAuth access token out of a credentials JSON blob.
-
-    Returns a non-empty, stripped token, or ``None`` if the blob doesn't parse
-    or the token is absent/empty (an empty token is as useless as no token —
-    the caller treats both as "not logged in")."""
+def _extract_credential(blob: str) -> tuple[str, int] | None:
+    """Pull ``(access_token, expires_at_epoch_seconds)`` out of a credentials
+    JSON blob. ``expires_at`` is 0 when the blob carries no (parsable)
+    ``expiresAt``; the token is returned non-empty and stripped, or the whole
+    result is ``None`` when the blob doesn't parse or the token is absent /
+    empty (an empty token is as useless as no token — the caller treats both
+    as "not logged in")."""
     try:
         creds = json.loads(blob)
-        token = creds["claudeAiOauth"]["accessToken"]
+        oauth = creds["claudeAiOauth"]
+        token = oauth["accessToken"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
     token = (token or "").strip()
-    return token or None
+    if not token:
+        return None
+    expires_at = 0
+    try:
+        # Claude Code stores expiresAt in milliseconds since the epoch.
+        raw = oauth.get("expiresAt") if isinstance(oauth, dict) else None
+        if raw is not None:
+            expires_at = int(float(raw) / 1000)
+    except (TypeError, ValueError):
+        expires_at = 0
+    return token, max(0, expires_at)
+
+
+def _extract_token(blob: str) -> str | None:
+    """Pull the OAuth access token out of a credentials JSON blob (see
+    ``_extract_credential``); ``None`` when there is no usable token."""
+    cred = _extract_credential(blob)
+    return cred[0] if cred else None
 
 
 def _load_credentials(claude_dir: str) -> str | None:
@@ -586,6 +605,14 @@ def _load_credentials(claude_dir: str) -> str | None:
     never writes the flat file, which is exactly when the widget would
     otherwise show blank session/weekly numbers with no explanation.
 
+    A source whose token is already past its ``expiresAt`` is skipped in
+    favour of the next one: on macOS a stale ``.credentials.json`` (a copy
+    left behind by a one-off ``claude setup-token`` / remote session) would
+    otherwise shadow the live Keychain token forever — Claude Code refreshes
+    the Keychain, not the file — and every ``/api/oauth/usage`` call would
+    401. When every source is expired the freshest one is returned anyway,
+    so the caller reports "credentials expired" rather than "no credentials".
+
     Returns the raw access-token string, or ``None`` if none is found.
     """
     # 0. Environment override — the highest-priority source Claude Code honours.
@@ -593,15 +620,17 @@ def _load_credentials(claude_dir: str) -> str | None:
     if env_tok:
         return env_tok
 
+    candidates: list[tuple[str, int]] = []
+
     # 1. Flat credentials file (Linux + macOS).
     creds_path = os.path.join(claude_dir, ".credentials.json")
     if os.path.isfile(creds_path):
         try:
             with open(creds_path, encoding="utf-8", errors="replace") as f:
                 blob = f.read()
-            token = _extract_token(blob)
-            if token:
-                return token
+            cred = _extract_credential(blob)
+            if cred:
+                candidates.append(cred)
         except OSError:
             pass  # Unreadable; fall through to the Keychain on macOS.
 
@@ -620,11 +649,20 @@ def _load_credentials(claude_dir: str) -> str | None:
             except (OSError, subprocess.SubprocessError):
                 continue
             if result.returncode == 0 and result.stdout.strip():
-                token = _extract_token(result.stdout.strip())
-                if token:
-                    return token
+                cred = _extract_credential(result.stdout.strip())
+                if cred:
+                    candidates.append(cred)
+                    break
 
-    return None
+    if not candidates:
+        return None
+    now = time.time()
+    # An unknown expiry (0) is trusted: only a token that says it is dead
+    # gets skipped.
+    live = [c for c in candidates if not c[1] or c[1] > now]
+    if live:
+        return live[0][0]
+    return max(candidates, key=lambda c: c[1])[0]
 
 
 @functools.lru_cache(maxsize=1)
