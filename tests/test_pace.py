@@ -187,6 +187,16 @@ class TestMenuBarCountdownColour(unittest.TestCase):
         self.assertTrue(self._has(pm, "bar_blue"))
         self.assertTrue(self._has(pm, "crit"))
 
+    def test_ahead_of_the_week_the_bar_is_not_green(self) -> None:
+        # 52% with most of the week ahead: under the 60% threshold, but on
+        # course to run out by midweek, so the bar is not the ok colour.
+        st = UsageStats()
+        now = datetime.now().timestamp()
+        st.weekly_utilization, st.weekly_reset = 0.52, int(now + 6 * 86400)
+        fake = SimpleNamespace(stats=st, config={"pace_colors": True, "pace_work_days": []})
+        pm = ClaudeUsageApp._tray_readout_pixmap(fake, self.theme, countdown=False)
+        self.assertTrue(self._has(pm, "crit"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -171,6 +171,20 @@ class _MenuProviderHeader(QWidget):
         self._live.setStyleSheet(f"color: {palette['dim']}; font-size: 12px;")
 
 
+def _alarm_color(pct: float, level: str, theme: dict[str, str]) -> QColor:
+    """Bar colour for *pct*, raised to the pace level when that is worse.
+
+    52% on the second day of the week is under the 60% bar threshold but
+    on course to run out by midweek; the bar has to say so too, not only
+    the countdown, which the compact layouts drop first.
+    """
+    if level == LEVEL_CRIT:
+        return _hex_to_qcolor(theme["crit"])
+    if level == LEVEL_WARN and pct < 0.6:
+        return _hex_to_qcolor(theme["warn"])
+    return _bar_color(pct, theme)
+
+
 def _pace_color(level: str, theme: dict[str, str]) -> QColor:
     """Countdown colour for a pace level; plain text when there is none."""
     if level == LEVEL_CRIT:
@@ -2077,7 +2091,7 @@ class ClaudeUsageApp(QObject):
         blocks: list, *, countdown: bool,
     ) -> list[list[tuple[str, str]]]:
         """Percentage and countdown as two runs of text per group: the
-        countdown may take the pace colour, the percentage never does."""
+        countdown takes the pace colour on its own."""
         return [[(f"{int(pct * 100)}%", f" {rst}" if countdown and rst else "")
                  for pct, rst, _ in groups] for _, _, groups in blocks]
 
@@ -2139,7 +2153,7 @@ class ClaudeUsageApp(QObject):
                     p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
                     p.drawRoundedRect(
                         QRectF(x, bar_y, _MB_BAR_W, _MB_BAR_H), _MB_BAR_H / 2, _MB_BAR_H / 2)
-                    p.setBrush(_bar_color(pct, theme))
+                    p.setBrush(_alarm_color(pct, level, theme))
                     p.drawRoundedRect(
                         QRectF(x, bar_y, max(_MB_BAR_H, _MB_BAR_W * pct), _MB_BAR_H),
                         _MB_BAR_H / 2, _MB_BAR_H / 2)
@@ -2152,7 +2166,7 @@ class ClaudeUsageApp(QObject):
                 # answers a different question — not "how much is gone" but
                 # "is it going faster than the clock" — so it keeps its own.
                 p.setPen(_hex_to_qcolor(theme["text_primary"]) if bars
-                         else _bar_color(pct, theme))
+                         else _alarm_color(pct, level, theme))
                 p.drawText(QPointF(x, baseline), pct_text)
                 x += fm.horizontalAdvance(pct_text)
                 if rst_text:
