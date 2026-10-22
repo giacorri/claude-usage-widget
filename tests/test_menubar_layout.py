@@ -203,3 +203,24 @@ class TestBudgetFor(unittest.TestCase):
         external = menubar_space.budget_for(1960, None, {})
         self.assertLess(notch, 270)
         self.assertEqual(external - notch, 1300)
+
+
+class TestNeedsLogin(unittest.TestCase):
+    """No login: Claude's windows are unknown, so they read "—", not 0%."""
+
+    def setUp(self) -> None:
+        _get_app()
+
+    def test_claude_groups_read_as_a_dash_codex_keeps_its_numbers(self) -> None:
+        fake = _fake(True)
+        fake.stats.needs_login = True
+        blocks = ClaudeUsageApp._readout_blocks(fake)
+        labels = ClaudeUsageApp._readout_labels(blocks, countdown=True)
+        self.assertEqual([a for a, _ in labels[0]], ["—", "—"])
+        self.assertEqual([a for a, _ in labels[1]], ["15%", "7%"])
+
+    def test_readout_paints_without_a_fraction(self) -> None:
+        fake = _fake(False)
+        fake.stats.needs_login = True
+        pm = ClaudeUsageApp._tray_readout_pixmap(fake, get_theme("zellij"))
+        self.assertFalse(pm.isNull())

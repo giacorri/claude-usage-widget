@@ -90,6 +90,9 @@ class UsageStats:
     overage_status: str = ""  # "rejected" or "allowed"
     fallback_status: str = ""  # "available" or ""
     rate_limit_error: str = ""  # error message if API call fails
+    # No OAuth token anywhere: the windows are unknown, not 0%, so the
+    # surfaces draw "—" instead of a number.
+    needs_login: bool = False
     session_history: list = field(default_factory=list)  # bucketed sparkline (oldest first)
     weekly_history: list = field(default_factory=list)
     # Subscription type from OAuth credentials ("max", "pro", "free", or "" if unknown).
@@ -700,10 +703,16 @@ def fetch_rate_limits(claude_dir: str) -> dict[str, Any]:
             # Homebrew / login item) may lack access to the item the Claude
             # Code CLI created, so it reads as "missing". Tell the user how
             # to grant it rather than showing silently-blank bars.
-            return {"error": "No credentials -- run 'claude-usage' once from a "
-                             "Terminal and click 'Always Allow' on the Keychain "
-                             "prompt (or set CLAUDE_CODE_OAUTH_TOKEN)"}
-        return {"error": "No credentials found -- run 'claude' to log in"}
+            # The Claude desktop app keeps its own login, out of reach, so
+            # a desktop-only user also lands here with nothing in the
+            # Keychain until the CLI is logged in.
+            return {"error": "Not logged in -- run 'claude /login' in a "
+                             "Terminal, then 'claude-usage --once' and click "
+                             "'Always Allow' on the Keychain prompt (or set "
+                             "CLAUDE_CODE_OAUTH_TOKEN)",
+                    "needs_login": True}
+        return {"error": "Not logged in -- run 'claude /login' in a Terminal",
+                "needs_login": True}
 
     # Primary path — the OAuth usage endpoint Claude Code itself uses.
     primary = _fetch_oauth_usage(token)
@@ -1099,6 +1108,7 @@ def collect_all(config: dict[str, Any]) -> UsageStats:
         pass
     elif "error" in rate_limits:
         stats.rate_limit_error = rate_limits["error"]
+        stats.needs_login = bool(rate_limits.get("needs_login"))
         # API call failed (transient network glitch, OAuth hiccup, etc.).
         # Without this, both utilization fields stay at the dataclass
         # default 0.0 and the widget paints "0% / 0%" until the next

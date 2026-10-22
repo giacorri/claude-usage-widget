@@ -90,6 +90,18 @@ def _short_reset_text(ts: int) -> str:
     return f"{minutes}m"
 
 
+# Claude's windows, which read as "—" rather than 0% without a login.
+_CLAUDE_PCT_ATTRS = ("session_utilization", "weekly_utilization")
+
+
+def _pct_text(stats: Any, attr: str) -> str:
+    """"42%", or "—" for a Claude window there is no login to read."""
+    if attr in _CLAUDE_PCT_ATTRS and getattr(stats, "needs_login", False):
+        return "—"
+    pct = max(0.0, min(1.0, float(getattr(stats, attr, 0.0) or 0.0)))
+    return f"{int(pct * 100)}%"
+
+
 def _menu_reset_text(ts: int) -> str:
     """"resets 13:07 (2h 11m)" — the clock time first, because that is what
     you plan around; the countdown is the sanity check next to it."""
@@ -1785,8 +1797,8 @@ class ClaudeUsageApp(QObject):
         # Claude block — "Session 42% · resets …" / "Weekly 71% · resets …",
         # with the live rate ("● 10.5k t/m") up on the provider's own row,
         # since it is a fact about Claude, not about either window.
-        s_pct = int((getattr(self.stats, "session_utilization", 0.0) or 0.0) * 100)
-        w_pct = int((getattr(self.stats, "weekly_utilization", 0.0) or 0.0) * 100)
+        s_pct = _pct_text(self.stats, "session_utilization")
+        w_pct = _pct_text(self.stats, "weekly_utilization")
         live = getattr(self.stats, "live_activity", None)
         live_txt = ""
         if live is not None and getattr(live, "is_live", False):
@@ -1799,11 +1811,14 @@ class ClaudeUsageApp(QObject):
         else:
             s_reset = _menu_reset_text(int(getattr(self.stats, "session_reset", 0) or 0))
             w_reset = _menu_reset_text(int(getattr(self.stats, "weekly_reset", 0) or 0))
+            if getattr(self.stats, "needs_login", False):
+                # Unknown, not empty: say so, and how to fix it.
+                s_reset, w_reset = "run 'claude /login' in a Terminal", ""
             self._act_stats_header.setText(
-                f"Session  {s_pct}%" + (f"  ·  {s_reset}" if s_reset else "")
+                f"Session  {s_pct}" + (f"  ·  {s_reset}" if s_reset else "")
             )
             self._act_stats_header2.setText(
-                f"Weekly   {w_pct}%" + (f"  ·  {w_reset}" if w_reset else "")
+                f"Weekly   {w_pct}" + (f"  ·  {w_reset}" if w_reset else "")
             )
         codex_on = self._last_refresh_ts > 0 and bool(
             getattr(self.stats, "codex_available", False))
@@ -2041,15 +2056,18 @@ class ClaudeUsageApp(QObject):
     def _on_overlay_right_click(self, global_pos: QPoint) -> None:
         self._context_menu.popup(global_pos)
 
-    def _readout_blocks(self) -> list[tuple[Callable[..., None], str, list[tuple[float, str, str]]]]:
+    def _readout_blocks(self) -> list[tuple[Callable[..., None], str, list[tuple[float | None, str, str]]]]:
         """One block per provider: its mark, its colour, its 5h and weekly
-        groups as (fraction used, countdown, countdown colour key or "")."""
+        groups as (fraction used, countdown, countdown colour key or "").
+        The fraction is ``None`` while Claude has no login to read it with."""
         st = self.stats
         config = getattr(self, "config", None) or {}
         pace_on = bool(config.get("pace_colors", False))
         now = datetime.now().timestamp()
 
-        def group(pct_attr: str, reset_attr: str, window: int) -> tuple[float, str, str]:
+        def group(pct_attr: str, reset_attr: str, window: int) -> tuple[float | None, str, str]:
+            if pct_attr in _CLAUDE_PCT_ATTRS and getattr(st, "needs_login", False):
+                return None, "", ""
             pct = max(0.0, min(1.0, float(getattr(st, pct_attr, 0.0) or 0.0)))
             reset = int(getattr(st, reset_attr, 0) or 0)
             level = ""
@@ -2062,7 +2080,7 @@ class ClaudeUsageApp(QObject):
 
         # Brighter than the OSD's clay: the menu bar sits on whatever the
         # wallpaper is doing up there, and #d97757 disappeared into it.
-        blocks: list[tuple[Callable[..., None], str, list[tuple[float, str, str]]]] = [
+        blocks: list[tuple[Callable[..., None], str, list[tuple[float | None, str, str]]]] = [
             (draw_claude_mark, "#ff8f66", [
                 group("session_utilization", "session_reset", SESSION_WINDOW_SECONDS),
                 group("weekly_utilization", "weekly_reset", WEEKLY_WINDOW_SECONDS),
@@ -2092,7 +2110,8 @@ class ClaudeUsageApp(QObject):
     ) -> list[list[tuple[str, str]]]:
         """Percentage and countdown as two runs of text per group: the
         countdown takes the pace colour on its own."""
-        return [[(f"{int(pct * 100)}%", f" {rst}" if countdown and rst else "")
+        return [[("—" if pct is None else f"{int(pct * 100)}%",
+                  f" {rst}" if countdown and rst else "")
                  for pct, rst, _ in groups] for _, _, groups in blocks]
 
     @classmethod
@@ -2153,10 +2172,11 @@ class ClaudeUsageApp(QObject):
                     p.setBrush(_hex_to_qcolor(theme["bar_track"], 0.55))
                     p.drawRoundedRect(
                         QRectF(x, bar_y, _MB_BAR_W, _MB_BAR_H), _MB_BAR_H / 2, _MB_BAR_H / 2)
-                    p.setBrush(_alarm_color(pct, level, theme))
-                    p.drawRoundedRect(
-                        QRectF(x, bar_y, max(_MB_BAR_H, _MB_BAR_W * pct), _MB_BAR_H),
-                        _MB_BAR_H / 2, _MB_BAR_H / 2)
+                    if pct is not None:
+                        p.setBrush(_alarm_color(pct, level, theme))
+                        p.drawRoundedRect(
+                            QRectF(x, bar_y, max(_MB_BAR_H, _MB_BAR_W * pct), _MB_BAR_H),
+                            _MB_BAR_H / 2, _MB_BAR_H / 2)
                     x += _MB_BAR_W + _MB_PAD
 
                 # With a bar the digits stay white: the bar already carries
@@ -2165,7 +2185,7 @@ class ClaudeUsageApp(QObject):
                 # the compact layouts would lose it altogether. The countdown
                 # answers a different question — not "how much is gone" but
                 # "is it going faster than the clock" — so it keeps its own.
-                p.setPen(_hex_to_qcolor(theme["text_primary"]) if bars
+                p.setPen(_hex_to_qcolor(theme["text_primary"]) if bars or pct is None
                          else _alarm_color(pct, level, theme))
                 p.drawText(QPointF(x, baseline), pct_text)
                 x += fm.horizontalAdvance(pct_text)
@@ -2243,9 +2263,8 @@ class ClaudeUsageApp(QObject):
             theme, bars=bars, countdown=countdown, blocks=shown, min_width=width,
             small=small)
         self._readout_shown_width = int(pm.deviceIndependentSize().width())
-        s_pct = int(max(0.0, min(1.0, float(self.stats.session_utilization))) * 100)
-        w_pct = int(max(0.0, min(1.0, float(self.stats.weekly_utilization))) * 100)
-        tip = f"Session {s_pct}%  ·  Weekly {w_pct}%"
+        tip = (f"Session {_pct_text(self.stats, 'session_utilization')}  ·  "
+               f"Weekly {_pct_text(self.stats, 'weekly_utilization')}")
         if getattr(self.stats, "codex_available", False):
             cs = int(max(0.0, min(1.0, float(self.stats.codex_session_utilization))) * 100)
             cw = int(max(0.0, min(1.0, float(self.stats.codex_weekly_utilization))) * 100)
