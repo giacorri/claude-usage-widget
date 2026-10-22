@@ -153,6 +153,11 @@ def _hex_to_qcolor(hex_str: str, alpha: float = 1.0) -> QColor:
     return QColor(r, g, b, int(alpha * 255))
 
 
+def _pct_label(pct: float | None) -> str:
+    """"42%", or "—" for a window with no data (Claude without a login)."""
+    return "—" if pct is None else f"{int(pct * 100)}%"
+
+
 def _format_reset_short(reset_ts: int) -> str:
     """Compact reset label: '2h 31m' (< 24h) or 'Mon 16:00' (>= 24h)."""
     if reset_ts <= 0:
@@ -303,6 +308,8 @@ class UsageOverlay(QWidget):
         # Live stats — updated externally via update_stats()
         self._session_pct: float = 0.0
         self._weekly_pct: float = 0.0
+        # Claude has no login: its two windows are unknown and read "—".
+        self._needs_login: bool = False
         self._session_reset: int = 0
         self._weekly_reset: int = 0
         # Optional model-scoped weekly cap (e.g. Fable). _scoped_label empty
@@ -405,6 +412,7 @@ class UsageOverlay(QWidget):
         self._last_stats = stats
         self._session_pct = max(0.0, min(1.0, float(stats.session_utilization)))
         self._weekly_pct = max(0.0, min(1.0, float(stats.weekly_utilization)))
+        self._needs_login = bool(getattr(stats, "needs_login", False))
         self._session_reset = int(stats.session_reset)
         self._weekly_reset = int(stats.weekly_reset)
         # Scoped weekly cap. If its presence changed since the last update,
@@ -914,7 +922,7 @@ class UsageOverlay(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(track)
         p.drawRoundedRect(QRectF(0, 0, w, h), 3, 3)
-        if self._session_pct > 0:
+        if self._session_pct > 0 and not self._needs_login:
             fill_w = max(w * min(self._session_pct, 1.0), 4)
             p.setBrush(_bar_color(self._session_pct, self._theme))
             p.drawRoundedRect(QRectF(0, 0, fill_w, h), 3, 3)
@@ -952,9 +960,9 @@ class UsageOverlay(QWidget):
         col_w = w / 2
         ring_d = max(50.0, min(col_w * 0.58, 80 * s))
         ring_stroke = max(4.0, 7 * s)
-        ring_rows: list[tuple[tuple[str, float, int], ...]] = [(
-            ("Session", self._session_pct, self._session_reset),
-            ("Weekly",  self._weekly_pct,  self._weekly_reset),
+        ring_rows: list[tuple[tuple[str, float | None, int], ...]] = [(
+            ("Session", None if self._needs_login else self._session_pct, self._session_reset),
+            ("Weekly",  None if self._needs_login else self._weekly_pct,  self._weekly_reset),
         )]
         if self._codex_available:
             ring_rows.append((
@@ -967,11 +975,11 @@ class UsageOverlay(QWidget):
             for idx, (label, pct, reset_ts) in enumerate(row):
                 cx = col_w * idx + col_w / 2
                 cy = row_top + ring_d / 2
-                fill_color = _bar_color(pct, self._theme)
-                self._draw_ring(p, cx, cy, ring_d, ring_stroke, pct, fill_color)
+                fill_color = _bar_color(pct or 0.0, self._theme)
+                self._draw_ring(p, cx, cy, ring_d, ring_stroke, pct or 0.0, fill_color)
 
                 # Percentage text centred in the ring.
-                pct_text = f"{int(pct * 100)}%"
+                pct_text = _pct_label(pct)
                 pct_font_pt = max(10, int(13 * s))
                 p.setFont(_mono_font(pct_font_pt, bold=True))
                 p.setPen(_hex_to_qcolor(self._theme["text_primary"]))
@@ -1135,7 +1143,7 @@ class UsageOverlay(QWidget):
         self._draw_row(
             p, y, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
             label="Session",
-            pct=self._session_pct,
+            pct=None if self._needs_login else self._session_pct,
             reset_label=_format_reset_short(self._session_reset),
             right_pad=pad_x,
         )
@@ -1145,7 +1153,7 @@ class UsageOverlay(QWidget):
         self._draw_row(
             p, y2, w, row_pad_x, bar_w, bar_h, bar_r, font_label, font_small,
             label="Weekly",
-            pct=self._weekly_pct,
+            pct=None if self._needs_login else self._weekly_pct,
             reset_label=_format_reset_short(self._weekly_reset),
             right_pad=pad_x,
         )
@@ -1344,11 +1352,13 @@ class UsageOverlay(QWidget):
         font_label: float,
         font_small: float,
         label: str,
-        pct: float,
+        pct: float | None,
         reset_label: str,
         right_pad: float | None = None,
     ) -> None:
         """Draw one row: label on the left, reset + percentage on the right, bar below.
+
+        ``pct`` is ``None`` for a window with no data: "—" and an empty bar.
 
         ``right_pad`` defaults to ``pad_x``; pass it when the left margin is
         widened by a gutter that the right edge should not inherit.
@@ -1366,7 +1376,7 @@ class UsageOverlay(QWidget):
             label_text = label.lower()
         p.drawText(QPointF(pad_x, baseline), label_text)
 
-        pct_text = f"{int(pct * 100)}%"
+        pct_text = _pct_label(pct)
         pct_width = p.fontMetrics().horizontalAdvance(pct_text)
         p.drawText(QPointF(w - right_pad - pct_width, baseline), pct_text)
 
@@ -1385,7 +1395,7 @@ class UsageOverlay(QWidget):
         # Bar — skin-specific style: ASCII block glyphs for terminal, sharp
         # rectangle for brutalist/receipt, classic rounded pill otherwise.
         bar_y = y + 14 * self._paint_scale
-        self._draw_bar(p, pad_x, bar_y, bar_w, bar_h, bar_r, pct)
+        self._draw_bar(p, pad_x, bar_y, bar_w, bar_h, bar_r, pct or 0.0)
 
     def _paint_paper_grain(self, p: QPainter, w: int, h: int) -> None:
         """Thin horizontal stripes every 4px — thermal-paper grain texture."""

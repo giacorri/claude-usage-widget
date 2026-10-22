@@ -1296,8 +1296,20 @@ class TestCollectAll(unittest.TestCase):
 
             self.assertEqual(stats.today_messages, 1)
             self.assertEqual(stats.rate_limit_error, "No credentials found")
+            self.assertFalse(stats.needs_login)
             # Rate-limit fields should remain at defaults
             self.assertAlmostEqual(stats.session_utilization, 0.0)
+
+    @patch("claude_usage.collector.fetch_rate_limits")
+    def test_collect_all_flags_a_missing_login(self, mock_fetch: Any) -> None:
+        """No token anywhere: the windows are unknown, flagged for the UI."""
+        mock_fetch.return_value = {"error": "Not logged in", "needs_login": True}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stats = collect_all({"claude_dir": tmpdir})
+
+            self.assertTrue(stats.needs_login)
+            self.assertEqual(stats.rate_limit_error, "Not logged in")
 
     @patch("claude_usage.collector.fetch_rate_limits")
     def test_collect_all_with_empty_directory(self, mock_fetch: Any) -> None:
